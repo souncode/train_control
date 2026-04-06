@@ -26,12 +26,30 @@ from flask import Flask, jsonify, request, render_template, abort, send_file, af
 from notify import TelegramNotifier
 
 # ===================== Cáº¤U HĂŒNH =====================
+def int_env(name: str, default: int, minimum: int | None = None, maximum: int | None = None) -> int:
+    try:
+        value = int(os.getenv(name, str(default)))
+    except Exception:
+        value = int(default)
+    if minimum is not None:
+        value = max(minimum, value)
+    if maximum is not None:
+        value = min(maximum, value)
+    return value
+
+
 ROOT_DIR = Path(r"D:\Object Detection\admin")   # sá»­a láº¡i Ä‘Æ°á»ng dáº«n tháº­t cá»§a báº¡n
 TRAIN_FILE = "Train_model_AI.py"
 PORT = 820
 HOST = "0.0.0.0"
 CONTINUE_IF_ERROR = True
-WAITRESS_THREADS = int(os.getenv("TRAIN_CONTROL_WAITRESS_THREADS", "16"))
+WAITRESS_THREADS = int_env("TRAIN_CONTROL_WAITRESS_THREADS", 48, minimum=8, maximum=256)
+WAITRESS_CONNECTION_LIMIT = int_env("TRAIN_CONTROL_WAITRESS_CONNECTION_LIMIT", 1000, minimum=32, maximum=10000)
+WAITRESS_CHANNEL_TIMEOUT = int_env("TRAIN_CONTROL_WAITRESS_CHANNEL_TIMEOUT", 120, minimum=30, maximum=600)
+WAITRESS_CLEANUP_INTERVAL = int_env("TRAIN_CONTROL_WAITRESS_CLEANUP_INTERVAL", 30, minimum=5, maximum=300)
+WAITRESS_MAX_REQUEST_BODY_SIZE = int_env("TRAIN_CONTROL_WAITRESS_MAX_REQUEST_BODY_SIZE", 1073741824, minimum=1048576)
+BACKUP_ROOT = Path(os.getenv("TRAIN_CONTROL_BACKUP_ROOT", r"F:\Object Detection\admin"))
+BACKUP_COPY_CHUNK_SIZE = int_env("TRAIN_CONTROL_BACKUP_CHUNK_SIZE", 1024 * 1024, minimum=64 * 1024, maximum=8 * 1024 * 1024)
 
 TRAIN_MONITOR_HOST = "127.0.0.1"
 TRAIN_MONITOR_PORT = 8008
@@ -67,6 +85,10 @@ app.secret_key = AUTH_SECRET_KEY
 app.config["SESSION_COOKIE_HTTPONLY"] = True
 app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
 app.config["SESSION_COOKIE_SECURE"] = False
+app.config["SESSION_REFRESH_EACH_REQUEST"] = False
+app.config["MAX_CONTENT_LENGTH"] = WAITRESS_MAX_REQUEST_BODY_SIZE
+app.config["JSON_AS_ASCII"] = False
+app.config["JSONIFY_PRETTYPRINT_REGULAR"] = False
 
 state_lock = threading.Lock()
 state_cond = threading.Condition(state_lock)
@@ -74,6 +96,7 @@ train_queue = queue.Queue()
 worker_thread = None
 monitor_thread = None
 app_runtime_initialized = False
+backup_lock = threading.Lock()
 
 STATE = {
     "projects": {},
@@ -107,6 +130,20 @@ CURRENT_TRAIN_CONTROL = {
 
 NOTIFY_STATE = {
     "enabled": False
+}
+
+BACKUP_TASK = {
+    "id": None,
+    "project": "",
+    "target_path": "",
+    "status": "idle",   # idle | running | success | failed
+    "progress": 0.0,
+    "eta_sec": None,
+    "copied_bytes": 0,
+    "total_bytes": 0,
+    "started_at": 0.0,
+    "ended_at": 0.0,
+    "message": "",
 }
 
 IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".bmp", ".webp", ".gif", ".tif", ".tiff"}
@@ -500,7 +537,11 @@ def monitor_snapshot_signature(status_ok, status_data, history_ok, history_state
 
 
 def build_state_payload_locked():
-    projects = [project_state_public(x) for x in STATE["projects"].values()]
+    projects = [
+        project_state_public(x)
+        for x in STATE["projects"].values()
+        if str(x.get("path") or "").strip()
+    ]
     projects.sort(key=lambda x: (x["name"] or "").lower())
 
     queue_with_order = [
@@ -568,6 +609,170 @@ def build_notify_state_payload_locked():
         "enabled": enabled,
         "configured": configured,
     }
+
+
+def build_backup_status_payload():
+    with backup_lock:
+        payload = dict(BACKUP_TASK)
+    payload["ok"] = True
+    return payload
+
+
+def reset_backup_task_locked():
+    BACKUP_TASK.update({
+        "id": None,
+        "project": "",
+        "target_path": "",
+        "status": "idle",
+        "progress": 0.0,
+        "eta_sec": None,
+        "copied_bytes": 0,
+        "total_bytes": 0,
+        "started_at": 0.0,
+        "ended_at": 0.0,
+        "message": "",
+    })
+
+
+def safe_backup_target_path(project_name: str) -> Path:
+    target_path = (BACKUP_ROOT / str(project_name or "").strip()).resolve()
+    backup_root_resolved = BACKUP_ROOT.resolve()
+    if target_path == backup_root_resolved or backup_root_resolved not in target_path.parents:
+        raise ValueError("Invalid backup target path")
+    return target_path
+
+
+def estimate_backup_eta(total_bytes: int, copied_bytes: int, started_at: float) -> int | None:
+    if total_bytes <= 0 or copied_bytes <= 0 or started_at <= 0:
+        return None
+    elapsed = max(0.001, time.time() - started_at)
+    speed = copied_bytes / elapsed
+    if speed <= 0:
+        return None
+    remaining = max(0, total_bytes - copied_bytes)
+    return max(0, int(remaining / speed))
+
+
+def calculate_directory_size(source_dir: Path) -> int:
+    total = 0
+    for root, _, files in os.walk(source_dir):
+        root_path = Path(root)
+        for name in files:
+            try:
+                total += (root_path / name).stat().st_size
+            except Exception:
+                pass
+    return max(1, total)
+
+
+def update_backup_progress(copied_bytes: int, total_bytes: int):
+    with backup_lock:
+        if BACKUP_TASK.get("status") != "running":
+            return
+        BACKUP_TASK["copied_bytes"] = int(copied_bytes)
+        BACKUP_TASK["total_bytes"] = int(total_bytes)
+        BACKUP_TASK["progress"] = max(0.0, min(100.0, (copied_bytes / max(1, total_bytes)) * 100.0))
+        BACKUP_TASK["eta_sec"] = estimate_backup_eta(total_bytes, copied_bytes, float(BACKUP_TASK.get("started_at") or 0.0))
+
+
+def copy_project_with_progress(source_dir: Path, target_dir: Path, total_bytes: int):
+    copied_bytes = 0
+    for root, dirs, files in os.walk(source_dir):
+        root_path = Path(root)
+        rel_root = root_path.relative_to(source_dir)
+        dst_root = target_dir / rel_root
+        dst_root.mkdir(parents=True, exist_ok=True)
+
+        for dir_name in dirs:
+            (dst_root / dir_name).mkdir(parents=True, exist_ok=True)
+
+        for file_name in files:
+            src_file = root_path / file_name
+            dst_file = dst_root / file_name
+            shutil.copystat(src_file, dst_file, follow_symlinks=False) if dst_file.exists() else None
+            with src_file.open("rb") as sf, dst_file.open("wb") as df:
+                while True:
+                    chunk = sf.read(BACKUP_COPY_CHUNK_SIZE)
+                    if not chunk:
+                        break
+                    df.write(chunk)
+                    copied_bytes += len(chunk)
+                    update_backup_progress(copied_bytes, total_bytes)
+            try:
+                shutil.copystat(src_file, dst_file, follow_symlinks=False)
+            except Exception:
+                pass
+    update_backup_progress(total_bytes, total_bytes)
+
+
+def run_project_backup(task_id: str, project_name: str, source_dir: Path, target_dir: Path):
+    try:
+        total_bytes = calculate_directory_size(source_dir)
+        with backup_lock:
+            BACKUP_TASK["total_bytes"] = total_bytes
+            BACKUP_TASK["message"] = f"Backing up {project_name}"
+
+        if target_dir.exists():
+            raise FileExistsError(f"Backup target already exists: {target_dir}")
+
+        target_dir.parent.mkdir(parents=True, exist_ok=True)
+        copy_project_with_progress(source_dir, target_dir, total_bytes)
+
+        with backup_lock:
+            if BACKUP_TASK.get("id") == task_id:
+                BACKUP_TASK["status"] = "success"
+                BACKUP_TASK["progress"] = 100.0
+                BACKUP_TASK["eta_sec"] = 0
+                BACKUP_TASK["ended_at"] = time.time()
+                BACKUP_TASK["message"] = f"Backup completed: {target_dir}"
+    except Exception as e:
+        try:
+            if target_dir.exists():
+                shutil.rmtree(target_dir, ignore_errors=True)
+        except Exception:
+            pass
+        with backup_lock:
+            if BACKUP_TASK.get("id") == task_id:
+                BACKUP_TASK["status"] = "failed"
+                BACKUP_TASK["ended_at"] = time.time()
+                BACKUP_TASK["message"] = str(e)
+
+
+def start_project_backup(project_name: str):
+    project_path = resolve_project_path(project_name)
+    if not project_path or not project_path.exists():
+        return False, "Không tìm thấy project", None
+
+    try:
+        target_path = safe_backup_target_path(project_name)
+    except Exception as e:
+        return False, str(e), None
+
+    with backup_lock:
+        if BACKUP_TASK.get("status") == "running":
+            return False, "Đang có backup khác chạy", None
+        reset_backup_task_locked()
+        task_id = f"backup-{int(time.time() * 1000)}"
+        BACKUP_TASK.update({
+            "id": task_id,
+            "project": project_name,
+            "target_path": str(target_path),
+            "status": "running",
+            "progress": 0.0,
+            "eta_sec": None,
+            "copied_bytes": 0,
+            "total_bytes": 0,
+            "started_at": time.time(),
+            "ended_at": 0.0,
+            "message": f"Starting backup to {target_path}",
+        })
+
+    threading.Thread(
+        target=run_project_backup,
+        args=(task_id, project_name, project_path, target_path),
+        daemon=True
+    ).start()
+    return True, f"Đã bắt đầu backup {project_name}", task_id
 
 
 def build_project_log_payload_locked(project: str, tail: int = API_LOG_TAIL_LINES):
@@ -892,9 +1097,18 @@ def scan_projects():
             info = ensure_project_state(p.name)
             info["path"] = str(p)
 
+        stale_names = []
         for name, info in STATE["projects"].items():
-            if name not in known_names and info.get("status") in ("idle", "success", "failed"):
+            if name in known_names:
+                continue
+
+            if info.get("status") in ("idle", "success", "failed", "stopped"):
+                stale_names.append(name)
+            else:
                 info["path"] = ""
+
+        for name in stale_names:
+            STATE["projects"].pop(name, None)
 
         STATE["last_scan"] = now_str()
         bump_state_version_locked()
@@ -1534,6 +1748,145 @@ def save_uploaded_project_zip(upload_file):
             return False, "copy_failed", target_name
 
     return True, "uploaded", target_name
+
+
+def _collect_importable_data_files(extract_root: Path):
+    image_rows = []
+    label_rows = []
+    file_items = []
+
+    for src in extract_root.rglob("*"):
+        if src.is_file():
+            rel = src.relative_to(extract_root)
+            file_items.append((src, rel))
+
+    if not file_items:
+        return image_rows, label_rows
+
+    top_level_parts = {rel.parts[0] for _, rel in file_items if rel.parts}
+    strip_first_part = len(top_level_parts) == 1
+
+    for src, rel in file_items:
+        rel_parts = list(rel.parts)
+        if strip_first_part and len(rel_parts) > 1:
+            rel_parts = rel_parts[1:]
+        elif strip_first_part and len(rel_parts) == 1:
+            rel_parts = rel.parts[:]
+
+        lower_parts = [part.lower() for part in rel_parts]
+        suffix = src.suffix.lower()
+
+        if suffix in IMAGE_EXTS:
+            trimmed_parts = rel_parts[:]
+            if lower_parts and lower_parts[0] in ("data", "dataset", "image", "images"):
+                trimmed_parts = rel_parts[1:]
+            rel_target = Path(*trimmed_parts) if trimmed_parts else Path(src.name)
+            image_rows.append((src, rel_target))
+            continue
+
+        if suffix != ".txt":
+            continue
+
+        trimmed_parts = rel_parts[:]
+        if lower_parts and lower_parts[0] in ("data", "dataset", "labels", "label"):
+            trimmed_parts = rel_parts[1:]
+        elif lower_parts and lower_parts[0] in ("image", "images"):
+            trimmed_parts = rel_parts[1:]
+
+        rel_target = Path(*trimmed_parts) if trimmed_parts else Path(src.stem).with_suffix(".txt")
+        label_rows.append((src, rel_target.with_suffix(".txt")))
+
+    return image_rows, label_rows
+
+
+def import_project_data_zip(project_name: str, upload_file):
+    project_path = resolve_project_path(project_name)
+    if not project_path or not project_path.exists():
+        return False, "project_not_found", None
+
+    image_dir = find_project_image_dir(project_path)
+    if not image_dir:
+        image_dir = project_path / "image"
+        try:
+            image_dir.mkdir(parents=True, exist_ok=True)
+        except Exception:
+            return False, "cannot_create_image_dir", None
+
+    labels_dir = image_dir / "labels"
+    try:
+        labels_dir.mkdir(parents=True, exist_ok=True)
+    except Exception:
+        return False, "cannot_create_label_dir", None
+
+    if not upload_file:
+        return False, "missing_file", None
+
+    filename = str(upload_file.filename or "").strip()
+    if not filename.lower().endswith(".zip"):
+        return False, "only_zip_supported", None
+
+    copied_images = 0
+    copied_labels = 0
+
+    with tempfile.TemporaryDirectory(prefix="traincontrol_import_") as tmp_dir:
+        tmp_dir_path = Path(tmp_dir)
+        zip_path = tmp_dir_path / "upload.zip"
+        extract_root = tmp_dir_path / "extract"
+        extract_root.mkdir(parents=True, exist_ok=True)
+
+        upload_file.save(str(zip_path))
+
+        try:
+            with zipfile.ZipFile(zip_path, "r") as zf:
+                infos = zf.infolist()
+                if not infos:
+                    return False, "zip_empty", None
+
+                for info in infos:
+                    name = str(info.filename or "").replace("\\", "/")
+                    parts = Path(name).parts
+                    if name.startswith("/") or ".." in parts:
+                        return False, "invalid_zip_path", None
+
+                zf.extractall(path=str(extract_root))
+        except zipfile.BadZipFile:
+            return False, "bad_zip_file", None
+        except Exception:
+            return False, "extract_failed", None
+
+        image_rows, label_rows = _collect_importable_data_files(extract_root)
+        if not image_rows and not label_rows:
+            return False, "no_data_found", None
+
+        for src, rel_target in image_rows:
+            dst = (image_dir / rel_target).resolve()
+            if not is_path_inside(dst, image_dir):
+                return False, "invalid_zip_path", None
+            try:
+                dst.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(src, dst)
+                copied_images += 1
+            except Exception:
+                return False, "copy_failed", None
+
+        for src, rel_target in label_rows:
+            dst = (labels_dir / rel_target).resolve()
+            if not is_path_inside(dst, labels_dir):
+                return False, "invalid_zip_path", None
+            try:
+                dst.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(src, dst)
+                copied_labels += 1
+            except Exception:
+                return False, "copy_failed", None
+
+    return True, "imported", {
+        "project": project_name,
+        "images_added": copied_images,
+        "labels_added": copied_labels,
+        "image_dir": str(image_dir),
+        "labels_dir": str(labels_dir),
+    }
 
 
 def get_output_model_train_weights_info(project_path: Path):
@@ -2701,6 +3054,21 @@ def logout():
     return jsonify({"ok": True, "message": "Logged out"})
 
 
+@app.route("/healthz")
+def healthz():
+    with state_lock:
+        payload = {
+            "ok": True,
+            "worker_running": bool(STATE.get("worker_running")),
+            "queue_size": len(STATE.get("queue") or []),
+            "project_count": len(STATE.get("projects") or {}),
+            "version": int(STATE.get("version", 0)),
+            "monitor_ok": bool(MONITOR_CACHE.get("status_ok") or MONITOR_CACHE.get("history_ok")),
+            "time": now_str(),
+        }
+    return jsonify(payload)
+
+
 @app.route("/")
 def index():
     creds = load_user_credentials()
@@ -3042,6 +3410,33 @@ def api_project_duplicate():
     return jsonify({"ok": True, "message": f"Đã nhân bản project thành {new_name}", "project": new_name})
 
 
+@app.route("/api/project/backup", methods=["POST"])
+def api_project_backup():
+    data = request.get_json(force=True) or {}
+    project = str(data.get("project", "") or "").strip()
+    if not project:
+        write_audit_log("project_backup", "failed", details="Missing project name")
+        return jsonify({"ok": False, "message": "Thiếu tên project"}), 400
+
+    ok, message, task_id = start_project_backup(project)
+    if not ok:
+        write_audit_log("project_backup", "failed", project=project, details=message)
+        return jsonify({"ok": False, "message": message}), 400
+
+    write_audit_log("project_backup", "started", project=project, target=str(BACKUP_ROOT), details=message)
+    return jsonify({
+        "ok": True,
+        "message": message,
+        "task_id": task_id,
+        "target_root": str(BACKUP_ROOT),
+    })
+
+
+@app.route("/api/project/backup_status")
+def api_project_backup_status():
+    return jsonify(build_backup_status_payload())
+
+
 @app.route("/api/project/delete", methods=["POST"])
 def api_project_delete():
     lv2 = require_lv2_json()
@@ -3126,6 +3521,53 @@ def api_project_clear_dataset():
         "ok": True,
         "message": f"Đã xóa: {', '.join(removed)}",
         "removed": removed
+    })
+
+
+@app.route("/api/project/import_data_zip", methods=["POST"])
+def api_project_import_data_zip():
+    project = str(request.form.get("project", "") or "").strip()
+    upload_file = request.files.get("file")
+
+    if not project:
+        write_audit_log("project_import_data_zip", "failed", details="Missing project name")
+        return jsonify({"ok": False, "message": "Thiếu tên project"}), 400
+
+    ok, status, details = import_project_data_zip(project, upload_file)
+    msg_map = {
+        "project_not_found": "Không tìm thấy project",
+        "cannot_create_image_dir": "Không tạo được thư mục image",
+        "cannot_create_label_dir": "Không tạo được thư mục labels",
+        "missing_file": "Thiếu file upload",
+        "only_zip_supported": "Chỉ hỗ trợ file .zip",
+        "zip_empty": "File zip trống",
+        "invalid_zip_path": "Đường dẫn trong zip không hợp lệ",
+        "bad_zip_file": "File zip bị lỗi",
+        "extract_failed": "Không giải nén được file zip",
+        "no_data_found": "Không tìm thấy ảnh hoặc label hợp lệ trong zip",
+        "copy_failed": "Không copy được dữ liệu vào project",
+    }
+
+    if not ok:
+        write_audit_log("project_import_data_zip", "failed", project=project, details=msg_map.get(status, status))
+        return jsonify({
+            "ok": False,
+            "status": status,
+            "message": msg_map.get(status, "Import data failed"),
+        }), 400
+
+    scan_projects()
+    images_added = int((details or {}).get("images_added", 0) or 0)
+    labels_added = int((details or {}).get("labels_added", 0) or 0)
+    message = f"Đã thêm dữ liệu vào {project}: {images_added} ảnh, {labels_added} label"
+    write_audit_log("project_import_data_zip", "success", project=project, details=message)
+    return jsonify({
+        "ok": True,
+        "status": "imported",
+        "project": project,
+        "images_added": images_added,
+        "labels_added": labels_added,
+        "message": message,
     })
 
 
@@ -3660,8 +4102,24 @@ if __name__ == "__main__":
     print(f"Web monitor is running at: http://127.0.0.1:{PORT}")
     try:
         from waitress import serve
-        print(f"Using waitress with threads={WAITRESS_THREADS}")
-        serve(app, host=HOST, port=PORT, threads=WAITRESS_THREADS)
+        print(
+            "Using waitress "
+            f"threads={WAITRESS_THREADS} "
+            f"connection_limit={WAITRESS_CONNECTION_LIMIT} "
+            f"channel_timeout={WAITRESS_CHANNEL_TIMEOUT}s "
+            f"cleanup_interval={WAITRESS_CLEANUP_INTERVAL}s "
+            f"max_request_body_size={WAITRESS_MAX_REQUEST_BODY_SIZE}"
+        )
+        serve(
+            app,
+            host=HOST,
+            port=PORT,
+            threads=WAITRESS_THREADS,
+            connection_limit=WAITRESS_CONNECTION_LIMIT,
+            channel_timeout=WAITRESS_CHANNEL_TIMEOUT,
+            cleanup_interval=WAITRESS_CLEANUP_INTERVAL,
+            max_request_body_size=WAITRESS_MAX_REQUEST_BODY_SIZE,
+        )
     except Exception:
         app.run(host=HOST, port=PORT, debug=False, threaded=True)
 

@@ -16,6 +16,10 @@ let lastLogRefreshTs = 0;
 let logRefreshInFlight = false;
 let latestStateData = null;
 let confusionViewState = new Map();
+let detailTabState = new Map();
+let pendingProjectDataUpload = '';
+let uploadProgressVisible = false;
+let sidePanelHidden = localStorage.getItem('train_monitor_side_panel_hidden') === '1';
 
 let sortState = {
     key: 'project',
@@ -35,14 +39,26 @@ const I18N = {
         app_title: 'AI Train Monitor',
         app_subtitle: 'Hiá»ƒn thá»‹ project Ä‘ang cháº¡y vĂ  pháº§n trÄƒm train trá»±c tiáº¿p tá»« Train_model_AI.py.',
         language_label: 'NgĂ´n ngá»¯',
+        logout: 'Dang xuat',
         root_dir: 'ROOT_DIR',
         last_scan: 'Scan gáº§n nháº¥t',
         current_training: 'Äang train',
         current_train_percent: '% train hiá»‡n táº¡i',
+        estimated_finish: 'Dự kiến xong',
         project_count: 'Sá»‘ project',
         train_monitor: 'Train monitor',
         scan_projects: 'QuĂ©t project',
         upload_project: 'Upload project (.zip)',
+        add_data_zip: 'Them data (.zip)',
+        backup_project: 'Backup project',
+        backup_selected: 'Backup da chon',
+        backup_starting: 'Dang bat dau backup...',
+        backup_progress: 'Dang backup project...',
+        backup_done: 'Backup hoan thanh',
+        backup_eta: 'Du kien con',
+        backup_target_exists: 'Thu muc backup da ton tai',
+        backup_batch_progress: 'Dang backup project da chon...',
+        backup_batch_done: 'Backup selected hoan thanh',
         train_selected: 'Train project Ä‘Ă£ chá»n',
         download_success_outputs: 'Tai tat ca Output success',
         train_all: 'Train táº¥t cáº£',
@@ -55,6 +71,9 @@ const I18N = {
         expand_all: 'Má»Ÿ táº¥t cáº£',
         collapse_all: 'Thu gá»n táº¥t cáº£',
         refresh: 'Refresh',
+        telegram_notify: 'Thong bao Telegram',
+        hide_side_panel: 'An panel phai',
+        show_side_panel: 'Hien panel phai',
         project_list: 'Danh sĂ¡ch project',
         project_list_desc: 'Báº¥m vĂ o tĂªn project Ä‘á»ƒ xem sá»‘ lÆ°á»£ng áº£nh vĂ  file weights trong Output',
         selected_count_prefix: 'ÄĂ£ chá»n:',
@@ -201,19 +220,39 @@ const I18N = {
         save_label: 'LÆ°u label',
         select_image_first: 'Chá»n áº£nh Ä‘á»ƒ xem/sá»­a label',
         uploading: 'Äang upload...',
+        uploading_data: 'Äang thêm data...',
+        detail_tab_dataset: 'Dataset',
+        detail_tab_output: 'Output',
+        detail_tab_metrics: 'Metrics',
+        detail_tab_labels: 'Labels',
+        labels_panel_desc: 'Mo Label Editor hoac them data zip cho project nay.',
+        open_label_editor: 'Mo Label Editor',
+        add_data_zip_button: 'Them data zip',
     },
     en: {
         app_title: 'AI Train Monitor',
         app_subtitle: 'Display the active project and training percentage',
         language_label: 'Language',
+        logout: 'Logout',
         root_dir: 'ROOT_DIR',
         last_scan: 'Last scan',
         current_training: 'Training now',
         current_train_percent: 'Current train %',
+        estimated_finish: 'Estimated finish',
         project_count: 'Projects',
         train_monitor: 'Train monitor',
         scan_projects: 'Scan projects',
         upload_project: 'Upload project (.zip)',
+        add_data_zip: 'Add data (.zip)',
+        backup_project: 'Backup project',
+        backup_selected: 'Backup selected',
+        backup_starting: 'Starting backup...',
+        backup_progress: 'Backing up project...',
+        backup_done: 'Backup completed',
+        backup_eta: 'ETA',
+        backup_target_exists: 'Backup target already exists',
+        backup_batch_progress: 'Backing up selected projects...',
+        backup_batch_done: 'Selected backup completed',
         train_selected: 'Train selected projects',
         download_success_outputs: 'Download success outputs',
         train_all: 'Train all',
@@ -226,6 +265,9 @@ const I18N = {
         expand_all: 'Expand all',
         collapse_all: 'Collapse all',
         refresh: 'Refresh',
+        telegram_notify: 'Telegram notification',
+        hide_side_panel: 'Hide right panel',
+        show_side_panel: 'Show right panel',
         project_list: 'Project list',
         project_list_desc: 'Click the project name to view image counts and weight files in Output',
         selected_count_prefix: 'Selected:',
@@ -372,6 +414,14 @@ const I18N = {
         save_label: 'Save label',
         select_image_first: 'Select an image to view/edit label',
         uploading: 'Uploading...',
+        uploading_data: 'Uploading data...',
+        detail_tab_dataset: 'Dataset',
+        detail_tab_output: 'Output',
+        detail_tab_metrics: 'Metrics',
+        detail_tab_labels: 'Labels',
+        labels_panel_desc: 'Open Label Editor or import a data zip for this project.',
+        open_label_editor: 'Open Label Editor',
+        add_data_zip_button: 'Add data zip',
     }
 };
 
@@ -385,7 +435,9 @@ function renderNotifyBell() {
 
     bell.classList.toggle('active', notifyState.enabled);
     bell.classList.toggle('off', !notifyState.enabled);
-    bell.title = notifyState.enabled ? t('notify_title_on') : t('notify_title_off');
+    const title = notifyState.enabled ? t('notify_title_on') : t('notify_title_off');
+    bell.title = title;
+    bell.setAttribute('aria-label', title);
 }
 
 function updateSortIndicators() {
@@ -401,6 +453,25 @@ function updateSortIndicators() {
     statusEl.textContent = sortState.key === 'status'
         ? (sortState.dir === 'asc' ? '^' : 'v')
         : '<->';
+}
+
+function updateHeroSubtitle(projectName = '') {
+    const el = document.getElementById('heroSubtitle');
+    if (!el) return;
+    const label = 'Project';
+    const name = String(projectName || '').trim() || '-';
+    el.textContent = `${label}: ${name}`;
+}
+
+function applySidePanelState() {
+    const layout = document.querySelector('.layout');
+    const toggleBtn = document.getElementById('toggleSidePanelBtn');
+    if (layout) {
+        layout.classList.toggle('layout-side-hidden', sidePanelHidden);
+    }
+    if (toggleBtn) {
+        toggleBtn.textContent = sidePanelHidden ? t('show_side_panel') : t('hide_side_panel');
+    }
 }
 
 function updateSummaryBadgeActive() {
@@ -428,6 +499,13 @@ function applyLanguage() {
     document.documentElement.lang = currentLang;
     document.querySelectorAll('[data-i18n]').forEach(el => {
         const key = el.getAttribute('data-i18n');
+        if (el.classList && el.classList.contains('toolbar-icon-btn')) {
+            const textEl = el.querySelector('.toolbar-text');
+            if (textEl) {
+                textEl.textContent = t(key);
+            }
+            return;
+        }
         el.textContent = t(key);
     });
 
@@ -444,17 +522,75 @@ function applyLanguage() {
         statusSelect.value = statusFilter;
     }
 
+    document.querySelectorAll('[data-tooltip-key]').forEach(el => {
+        const key = el.getAttribute('data-tooltip-key');
+        const text = t(key);
+        el.title = text;
+        el.setAttribute('aria-label', text);
+    });
+
     localStorage.setItem('train_monitor_lang', currentLang);
 
     renderNotifyBell();
     updateSortIndicators();
     updateSummaryBadgeActive();
+    updateHeroSubtitle((latestStateData && latestStateData.current_train_project) || '');
+}
+
+function applyToolbarIcons() {
+    const cfg = window.TOOLBAR_ICON_CONFIG || {};
+    const iconMap = cfg.icons || {};
+
+    document.querySelectorAll('[data-icon-key]').forEach(btn => {
+        const key = btn.getAttribute('data-icon-key');
+        const iconEl = btn.querySelector('.toolbar-icon');
+        if (!iconEl) return;
+
+        const iconInfo = iconMap[key];
+        if (!iconInfo || !iconInfo.path) {
+            iconEl.classList.remove('has-image');
+            return;
+        }
+
+        const altText = t(btn.getAttribute('data-tooltip-key') || key);
+        iconEl.innerHTML = `<img src="${escapeAttr(iconInfo.path)}" alt="${escapeAttr(altText)}">`;
+        iconEl.classList.add('has-image');
+    });
+}
+
+function updateStickyLayoutMetrics() {
+    const root = document.documentElement;
+    const stickyPanel = document.querySelector('.sticky-top-panel');
+    const projectBadges = document.getElementById('projectSummaryBadges');
+    if (!root || !stickyPanel) return;
+
+    const rect = stickyPanel.getBoundingClientRect();
+    const height = Math.ceil(rect.height || 0);
+    if (height > 0) {
+        root.style.setProperty('--sticky-header-height', `${height}px`);
+    }
+
+    if (projectBadges) {
+        const badgeHeight = Math.ceil(projectBadges.getBoundingClientRect().height || 0);
+        if (badgeHeight > 0) {
+            root.style.setProperty('--project-filter-height', `${badgeHeight}px`);
+        }
+    }
 }
 
 function setLanguage(lang) {
     currentLang = lang;
     applyLanguage();
+    applyToolbarIcons();
+    applySidePanelState();
+    updateStickyLayoutMetrics();
     refreshAll();
+}
+
+function toggleSidePanel() {
+    sidePanelHidden = !sidePanelHidden;
+    localStorage.setItem('train_monitor_side_panel_hidden', sidePanelHidden ? '1' : '0');
+    applySidePanelState();
 }
 
 async function apiGet(url, opts = {}) {
@@ -744,6 +880,22 @@ function fmtT(sec) {
     return `${h}:${m}:${s}`;
 }
 
+function fmtEstimatedFinish(sec) {
+    if (sec === null || sec === undefined || Number.isNaN(Number(sec))) return '-';
+    sec = Number(sec);
+    if (sec <= 0) return '-';
+
+    const dt = new Date(Date.now() + (sec * 1000));
+    if (Number.isNaN(dt.getTime())) return '-';
+
+    const dd = String(dt.getDate()).padStart(2, '0');
+    const mm = String(dt.getMonth() + 1).padStart(2, '0');
+    const hh = String(dt.getHours()).padStart(2, '0');
+    const mi = String(dt.getMinutes()).padStart(2, '0');
+    const ss = String(dt.getSeconds()).padStart(2, '0');
+    return `${dd}/${mm} ${hh}:${mi}:${ss}`;
+}
+
 function updateSelectedCount() {
     document.getElementById('selectedCount').textContent = selectedProjects.size;
 }
@@ -773,6 +925,7 @@ function selectAllProjects() {
     });
     document.getElementById('checkAll').checked = checkboxes.length > 0;
     updateSelectedCount();
+    refreshData(latestStateData || undefined);
 }
 
 function clearAllProjects() {
@@ -781,6 +934,7 @@ function clearAllProjects() {
     selectedProjects.clear();
     document.getElementById('checkAll').checked = false;
     updateSelectedCount();
+    refreshData(latestStateData || undefined);
 }
 
 function resetProjectSelection() {
@@ -824,6 +978,7 @@ function toggleCheckAll(master) {
         else selectedProjects.delete(cb.value);
     });
     updateSelectedCount();
+    refreshData(latestStateData || undefined);
 }
 
 function toggleProjectSelection(checkbox) {
@@ -836,6 +991,7 @@ function toggleProjectSelection(checkbox) {
     document.getElementById('checkAll').checked = allChecks.length > 0 && allChecks.length === checkedChecks.length;
 
     updateSelectedCount();
+    refreshData(latestStateData || undefined);
 }
 
 function toggleSort(key) {
@@ -992,6 +1148,20 @@ function getRunConfusionViewState(runKey) {
     return confusionViewState.get(key);
 }
 
+function getProjectDetailTab(projectName) {
+    const key = String(projectName || '');
+    if (!detailTabState.has(key)) {
+        detailTabState.set(key, 'dataset');
+    }
+    return detailTabState.get(key);
+}
+
+function setProjectDetailTab(encodedName, tabKey = 'dataset') {
+    const projectName = decodeURIComponent(String(encodedName || ''));
+    detailTabState.set(projectName, String(tabKey || 'dataset'));
+    refreshData(latestStateData || undefined);
+}
+
 function setRunConfusionClassFilter(projectName, runKey, className = '') {
     const state = getRunConfusionViewState(runKey);
     state.className = decodeURIComponent(String(className || ''));
@@ -1028,6 +1198,7 @@ function renderProjectDetailContent(projectName) {
     }
 
     const datasetConfig = data.dataset_config || {};
+    const activeTab = getProjectDetailTab(projectName);
 
     const weightsHtml = (data.weight_files && data.weight_files.length > 0)
         ? `
@@ -1338,95 +1509,123 @@ function renderProjectDetailContent(projectName) {
         }).join('')
         : `<div class="muted-box">${data.output_folder_exists ? t('no_weights_files') : t('no_output_folder')}</div>`;
 
+    const datasetTabHtml = `
+        <div class="detail-grid">
+            <div class="detail-box">
+                <div class="detail-title">${t('dataset_config_title')}</div>
+                <div class="detail-stats">
+                    <div class="detail-stat-item">
+                        <div class="detail-stat-label">${t('train_ratio')}</div>
+                        <div class="detail-stat-value"><input type="number" min="0" max="100" id="dsTrain_${projectDomId(projectName)}" value="${escapeHtml(datasetConfig.train_percent ?? 80)}"></div>
+                    </div>
+                    <div class="detail-stat-item">
+                        <div class="detail-stat-label">${t('valid_ratio')}</div>
+                        <div class="detail-stat-value"><input type="number" min="0" max="100" id="dsValid_${projectDomId(projectName)}" value="${escapeHtml(datasetConfig.valid_percent ?? 20)}"></div>
+                    </div>
+                    <div class="detail-stat-item">
+                        <div class="detail-stat-label">${t('test_ratio')}</div>
+                        <div class="detail-stat-value"><input type="number" min="0" max="100" id="dsTest_${projectDomId(projectName)}" value="${escapeHtml(datasetConfig.test_percent ?? 0)}"></div>
+                    </div>
+                    <div class="detail-stat-item">
+                        <div class="detail-stat-label">${t('shuffle_dataset')}</div>
+                        <div class="detail-stat-value"><input type="checkbox" id="dsShuffle_${projectDomId(projectName)}" ${(datasetConfig.shuffle ?? true) ? 'checked' : ''}></div>
+                    </div>
+                    <div class="detail-stat-item">
+                        <div class="detail-stat-label">${t('seed_value')}</div>
+                        <div class="detail-stat-value"><input type="number" id="dsSeed_${projectDomId(projectName)}" value="${escapeHtml(datasetConfig.seed ?? 42)}"></div>
+                    </div>
+                    <div class="detail-stat-item">
+                        <div class="detail-stat-label">${t('split_by_class')}</div>
+                        <div class="detail-stat-value"><input type="checkbox" id="dsSplitClass_${projectDomId(projectName)}" ${(datasetConfig.split_by_class ?? false) ? 'checked' : ''}></div>
+                    </div>
+                    <div class="detail-stat-item">
+                        <div class="detail-stat-label">${t('train_all_data')}</div>
+                        <div class="detail-stat-value"><input type="checkbox" id="dsTrainAll_${projectDomId(projectName)}" ${(datasetConfig.train_all_data ?? false) ? 'checked' : ''}></div>
+                    </div>
+                </div>
+                <div class="small mb8">${t('dataset_ratio_hint')}</div>
+                <div class="detail-actions">
+                    <button class="btn-light btn-mini" onclick="saveDatasetConfig('${encodeURIComponent(projectName)}')">${t('save_config')}</button>
+                    <button class="btn-primary btn-mini" onclick="createDataset('${encodeURIComponent(projectName)}')">${t('create_dataset')}</button>
+                </div>
+            </div>
+
+            <div class="detail-box">
+                <div class="detail-title">${t('image_counts')}</div>
+                <div class="detail-stats">
+                    <div class="detail-stat-item">
+                        <div class="detail-stat-label">${t('image_folder_count')}</div>
+                        <div class="detail-stat-value">${data.image_folder_count ?? 0}</div>
+                    </div>
+                    <div class="detail-stat-item">
+                        <div class="detail-stat-label">${t('train_images_count')}</div>
+                        <div class="detail-stat-value">${data.train_images_count ?? 0}</div>
+                    </div>
+                    <div class="detail-stat-item">
+                        <div class="detail-stat-label">${t('valid_images_count')}</div>
+                        <div class="detail-stat-value">${data.valid_images_count ?? 0}</div>
+                    </div>
+                    <div class="detail-stat-item">
+                        <div class="detail-stat-label">${t('test_images_count')}</div>
+                        <div class="detail-stat-value">${data.test_images_count ?? 0}</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+
+    const outputTabHtml = `
+        <div class="detail-grid">
+            <div class="detail-box">
+                <div class="detail-title">${t('output_weights_files')}</div>
+                <div class="detail-stats">
+                    <div class="detail-stat-item">
+                        <div class="detail-stat-label">${t('model_train_folder_count')}</div>
+                        <div class="detail-stat-value">${(data.model_train_folders || []).length}</div>
+                    </div>
+                    <div class="detail-stat-item">
+                        <div class="detail-stat-label">${t('weights_file_count')}</div>
+                        <div class="detail-stat-value">${data.weight_files_count ?? 0}</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="detail-box detail-box-full">
+            <div class="detail-title">${t('output_weights_files')}</div>
+            ${weightsHtml}
+        </div>
+    `;
+
+    const metricsTabHtml = `
+        <div class="detail-box detail-box-full">
+            <div class="detail-title">${t('model_train_details')}</div>
+            ${runDetailsHtml}
+        </div>
+    `;
+
+    const labelsTabHtml = `
+        <div class="detail-box detail-box-full">
+            <div class="detail-title">${t('label_editor')}</div>
+            <div class="small mb18">${t('labels_panel_desc')}</div>
+            <div class="detail-actions">
+                <button class="btn-light btn-mini" onclick="openProjectEditor('${encodeURIComponent(projectName)}')">${t('open_label_editor')}</button>
+                <button class="btn-success btn-mini" onclick="openProjectDataUpload('${encodeURIComponent(projectName)}')">${t('add_data_zip_button')}</button>
+            </div>
+        </div>
+    `;
+
     return `
         <div class="detail-panel">
-            <div class="detail-grid">
-                <div class="detail-box">
-                    <div class="detail-title">${t('dataset_config_title')}</div>
-                    <div class="detail-stats">
-                        <div class="detail-stat-item">
-                            <div class="detail-stat-label">${t('train_ratio')}</div>
-                            <div class="detail-stat-value"><input type="number" min="0" max="100" id="dsTrain_${projectDomId(projectName)}" value="${escapeHtml(datasetConfig.train_percent ?? 80)}"></div>
-                        </div>
-                        <div class="detail-stat-item">
-                            <div class="detail-stat-label">${t('valid_ratio')}</div>
-                            <div class="detail-stat-value"><input type="number" min="0" max="100" id="dsValid_${projectDomId(projectName)}" value="${escapeHtml(datasetConfig.valid_percent ?? 20)}"></div>
-                        </div>
-                        <div class="detail-stat-item">
-                            <div class="detail-stat-label">${t('test_ratio')}</div>
-                            <div class="detail-stat-value"><input type="number" min="0" max="100" id="dsTest_${projectDomId(projectName)}" value="${escapeHtml(datasetConfig.test_percent ?? 0)}"></div>
-                        </div>
-                        <div class="detail-stat-item">
-                            <div class="detail-stat-label">${t('shuffle_dataset')}</div>
-                            <div class="detail-stat-value"><input type="checkbox" id="dsShuffle_${projectDomId(projectName)}" ${(datasetConfig.shuffle ?? true) ? 'checked' : ''}></div>
-                        </div>
-                        <div class="detail-stat-item">
-                            <div class="detail-stat-label">${t('seed_value')}</div>
-                            <div class="detail-stat-value"><input type="number" id="dsSeed_${projectDomId(projectName)}" value="${escapeHtml(datasetConfig.seed ?? 42)}"></div>
-                        </div>
-                        <div class="detail-stat-item">
-                            <div class="detail-stat-label">${t('split_by_class')}</div>
-                            <div class="detail-stat-value"><input type="checkbox" id="dsSplitClass_${projectDomId(projectName)}" ${(datasetConfig.split_by_class ?? false) ? 'checked' : ''}></div>
-                        </div>
-                        <div class="detail-stat-item">
-                            <div class="detail-stat-label">${t('train_all_data')}</div>
-                            <div class="detail-stat-value"><input type="checkbox" id="dsTrainAll_${projectDomId(projectName)}" ${(datasetConfig.train_all_data ?? false) ? 'checked' : ''}></div>
-                        </div>
-                    </div>
-                    <div class="small mb8">${t('dataset_ratio_hint')}</div>
-                    <div class="action-wrap">
-                        <button class="btn-light btn-mini" onclick="saveDatasetConfig('${encodeURIComponent(projectName)}')">${t('save_config')}</button>
-                        <button class="btn-primary btn-mini" onclick="createDataset('${encodeURIComponent(projectName)}')">${t('create_dataset')}</button>
-                    </div>
-                </div>
-
-                <div class="detail-box">
-                    <div class="detail-title">${t('image_counts')}</div>
-                    <div class="detail-stats">
-                        <div class="detail-stat-item">
-                            <div class="detail-stat-label">${t('image_folder_count')}</div>
-                            <div class="detail-stat-value">${data.image_folder_count ?? 0}</div>
-                        </div>
-                        <div class="detail-stat-item">
-                            <div class="detail-stat-label">${t('train_images_count')}</div>
-                            <div class="detail-stat-value">${data.train_images_count ?? 0}</div>
-                        </div>
-                        <div class="detail-stat-item">
-                            <div class="detail-stat-label">${t('valid_images_count')}</div>
-                            <div class="detail-stat-value">${data.valid_images_count ?? 0}</div>
-                        </div>
-                        <div class="detail-stat-item">
-                            <div class="detail-stat-label">${t('test_images_count')}</div>
-                            <div class="detail-stat-value">${data.test_images_count ?? 0}</div>
-                        </div>
-                    </div>
-                </div>
-
-                <div class="detail-box">
-                    <div class="detail-title">${t('output_weights_files')}</div>
-                    <div class="detail-stats">
-                        <div class="detail-stat-item">
-                            <div class="detail-stat-label">${t('model_train_folder_count')}</div>
-                            <div class="detail-stat-value">${(data.model_train_folders || []).length}</div>
-                        </div>
-                        <div class="detail-stat-item">
-                            <div class="detail-stat-label">${t('weights_file_count')}</div>
-                            <div class="detail-stat-value">${data.weight_files_count ?? 0}</div>
-                        </div>
-                    </div>
-                </div>
+            <div class="detail-tabs">
+                <button class="detail-tab-btn ${activeTab === 'dataset' ? 'active' : ''}" onclick="setProjectDetailTab('${encodeURIComponent(projectName)}', 'dataset')">${t('detail_tab_dataset')}</button>
+                <button class="detail-tab-btn ${activeTab === 'output' ? 'active' : ''}" onclick="setProjectDetailTab('${encodeURIComponent(projectName)}', 'output')">${t('detail_tab_output')}</button>
+                <button class="detail-tab-btn ${activeTab === 'metrics' ? 'active' : ''}" onclick="setProjectDetailTab('${encodeURIComponent(projectName)}', 'metrics')">${t('detail_tab_metrics')}</button>
+                <button class="detail-tab-btn ${activeTab === 'labels' ? 'active' : ''}" onclick="setProjectDetailTab('${encodeURIComponent(projectName)}', 'labels')">${t('detail_tab_labels')}</button>
             </div>
-
-            <div class="detail-box detail-box-full">
-                <div class="detail-title">${t('output_weights_files')}</div>
-                ${weightsHtml}
-            </div>
-
-            <div class="detail-box detail-box-full">
-                <div class="detail-title">${t('model_train_details')}</div>
-                ${runDetailsHtml}
-            </div>
-
+            <div class="detail-tab-panel ${activeTab === 'dataset' ? 'active' : ''}">${datasetTabHtml}</div>
+            <div class="detail-tab-panel ${activeTab === 'output' ? 'active' : ''}">${outputTabHtml}</div>
+            <div class="detail-tab-panel ${activeTab === 'metrics' ? 'active' : ''}">${metricsTabHtml}</div>
+            <div class="detail-tab-panel ${activeTab === 'labels' ? 'active' : ''}">${labelsTabHtml}</div>
         </div>
     `;
 }
@@ -1512,7 +1711,7 @@ async function refreshData(prefetchedData = null, options = {}) {
     processHistoryNotifications(data.history || []);
 
     document.getElementById('lastScan').textContent = data.last_scan || '-';
-    document.getElementById('current').textContent = data.current_train_project || '-';
+    updateHeroSubtitle(data.current_train_project || '');
     document.getElementById('currentProgress').textContent = `${Number(data.current_train_progress || 0).toFixed(1)}%`;
     document.getElementById('projectCount').textContent = data.projects.length || 0;
     updateSummaryBadges(data.projects || []);
@@ -1540,12 +1739,16 @@ async function refreshData(prefetchedData = null, options = {}) {
         const checked = selectedProjects.has(p.name) ? 'checked' : '';
         const runningClass = p.status === 'running' ? 'running-row' : '';
         const isExpanded = expandedProjects.has(p.name);
+        const isSelected = selectedProjects.has(p.name);
+        const activeClass = (isExpanded || isSelected) ? 'project-row-active' : '';
 
         const actionButtons = p.status === 'running'
             ? `
                 <div class="action-wrap">
                     <button class="btn-warning btn-mini btn-icon" onclick="stopCurrentTrain()" title="${t('stop_button')}">■</button>
                     <button class="btn-light btn-mini btn-icon" onclick="openProjectEditor('${encodeURIComponent(p.name)}')" title="${t('edit_button')}">✎</button>
+                    <button class="btn-success btn-mini btn-icon" onclick="openProjectDataUpload('${encodeURIComponent(p.name)}')" title="${t('add_data_zip')}">＋</button>
+                    <button class="btn-light btn-mini btn-icon" onclick="backupProject('${encodeURIComponent(p.name)}')" title="${t('backup_project')}">⇪</button>
                     <button class="btn-light btn-mini btn-icon" onclick="duplicateProjectPrompt('${encodeURIComponent(p.name)}')" title="${t('duplicate_button')}">⧉</button>
                     <button class="btn-warning btn-mini btn-icon" onclick="clearDatasetPrompt('${encodeURIComponent(p.name)}')" title="${t('clear_dataset_button')}">🧹</button>
                     <button class="btn-danger btn-mini btn-icon" onclick="deleteProjectPrompt('${encodeURIComponent(p.name)}')" title="${t('delete_button')}">🗑</button>
@@ -1556,6 +1759,8 @@ async function refreshData(prefetchedData = null, options = {}) {
                 <div class="action-wrap">
                     <button class="btn-danger btn-mini btn-icon" onclick="queueSingle('${encodeURIComponent(p.name)}')" title="${t('retry_button')}">↻</button>
                     <button class="btn-light btn-mini btn-icon" onclick="openProjectEditor('${encodeURIComponent(p.name)}')" title="${t('edit_button')}">✎</button>
+                    <button class="btn-success btn-mini btn-icon" onclick="openProjectDataUpload('${encodeURIComponent(p.name)}')" title="${t('add_data_zip')}">＋</button>
+                    <button class="btn-light btn-mini btn-icon" onclick="backupProject('${encodeURIComponent(p.name)}')" title="${t('backup_project')}">⇪</button>
                     <button class="btn-light btn-mini btn-icon" onclick="duplicateProjectPrompt('${encodeURIComponent(p.name)}')" title="${t('duplicate_button')}">⧉</button>
                     <button class="btn-warning btn-mini btn-icon" onclick="clearDatasetPrompt('${encodeURIComponent(p.name)}')" title="${t('clear_dataset_button')}">🧹</button>
                     <button class="btn-danger btn-mini btn-icon" onclick="deleteProjectPrompt('${encodeURIComponent(p.name)}')" title="${t('delete_button')}">🗑</button>
@@ -1565,6 +1770,8 @@ async function refreshData(prefetchedData = null, options = {}) {
                 <div class="action-wrap">
                     <button class="btn-primary btn-mini btn-icon" onclick="queueSingle('${encodeURIComponent(p.name)}')" title="${t('train_button')}">▶</button>
                     <button class="btn-light btn-mini btn-icon" onclick="openProjectEditor('${encodeURIComponent(p.name)}')" title="${t('edit_button')}">✎</button>
+                    <button class="btn-success btn-mini btn-icon" onclick="openProjectDataUpload('${encodeURIComponent(p.name)}')" title="${t('add_data_zip')}">＋</button>
+                    <button class="btn-light btn-mini btn-icon" onclick="backupProject('${encodeURIComponent(p.name)}')" title="${t('backup_project')}">⇪</button>
                     <button class="btn-light btn-mini btn-icon" onclick="duplicateProjectPrompt('${encodeURIComponent(p.name)}')" title="${t('duplicate_button')}">⧉</button>
                     <button class="btn-warning btn-mini btn-icon" onclick="clearDatasetPrompt('${encodeURIComponent(p.name)}')" title="${t('clear_dataset_button')}">🧹</button>
                     <button class="btn-danger btn-mini btn-icon" onclick="deleteProjectPrompt('${encodeURIComponent(p.name)}')" title="${t('delete_button')}">🗑</button>
@@ -1572,7 +1779,7 @@ async function refreshData(prefetchedData = null, options = {}) {
             `;
 
         const tr = document.createElement('tr');
-        tr.className = runningClass;
+        tr.className = [runningClass, activeClass].filter(Boolean).join(' ');
         tr.innerHTML = `
             <td>${index + 1}</td>
             <td>
@@ -1666,6 +1873,7 @@ function renderMonitorState(s) {
     document.getElementById('trainProgressText').textContent = `epoch ${s.epoch || 0}/${s.epochs || 0} | ${progress.toFixed(1)}%`;
     document.getElementById('trainProgressFill').style.width = `${progress}%`;
 
+    document.getElementById('estimatedFinish').textContent = fmtEstimatedFinish(s.eta_sec);
     document.getElementById('m_eta').textContent = fmtT(s.eta_sec);
     document.getElementById('m_elapsed').textContent = fmtT(s.elapsed_sec);
     document.getElementById('m_lr').textContent = f(s.lr, 5);
@@ -2012,18 +2220,179 @@ function openProjectEditor(encodedName) {
     window.open(url, '_blank');
 }
 
+function setUploadProgress(percent, text = 'Uploading...', detail = '') {
+    const host = ensureModalHost();
+    if (!host) return;
+
+    const pct = Math.max(0, Math.min(100, Number(percent) || 0));
+    const safeText = escapeHtml(text);
+    const safeValue = `${pct.toFixed(0)}%`;
+    const safeDetail = escapeHtml(detail || '');
+
+    host.innerHTML = `
+        <div class="web-modal-backdrop upload-progress-backdrop">
+            <div class="web-modal upload-progress-modal" role="dialog" aria-modal="true" aria-label="${escapeAttr(text || 'Uploading')}">
+                <div class="web-modal-head">
+                    <div class="web-modal-title">${safeText}</div>
+                </div>
+                <div class="web-modal-body">
+                    <div class="upload-progress-head">
+                        <span>${safeText}</span>
+                        <span>${safeValue}</span>
+                    </div>
+                    ${safeDetail ? `<div class="small mb8">${safeDetail}</div>` : ''}
+                    <div class="upload-progress-bar">
+                        <div class="upload-progress-fill" style="width:${pct}%"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+    uploadProgressVisible = true;
+}
+
+function hideUploadProgress() {
+    if (!uploadProgressVisible) return;
+    const host = ensureModalHost();
+    if (host) host.innerHTML = '';
+    uploadProgressVisible = false;
+}
+
+function fmtEtaSeconds(sec) {
+    const n = Number(sec);
+    if (!Number.isFinite(n) || n < 0) return '-';
+    const s = Math.floor(n % 60);
+    const m = Math.floor((n / 60) % 60);
+    const h = Math.floor(n / 3600);
+    if (h > 0) return `${h}h ${m}m ${s}s`;
+    if (m > 0) return `${m}m ${s}s`;
+    return `${s}s`;
+}
+
+async function backupProject(encodedName) {
+    try {
+        const project = decodeURIComponent(encodedName);
+        const result = await runBackupTask(project, (status) => {
+            const etaText = status.eta_sec === null || status.eta_sec === undefined
+                ? project
+                : `${project} | ${t('backup_eta')}: ${fmtEtaSeconds(status.eta_sec)}`;
+            setUploadProgress(status.progress || 0, t('backup_progress'), etaText);
+        });
+        setUploadProgress(100, t('backup_done'), result.target_path || '');
+        await sleep(500);
+        hideUploadProgress();
+        alert(msg(result.message, t('backup_done')));
+    } catch (e) {
+        hideUploadProgress();
+        alert(String(e.message || e));
+    }
+}
+
+async function runBackupTask(project, progressRenderer = null) {
+    setUploadProgress(0, t('backup_starting'), project);
+
+    const data = await apiGet('/api/project/backup', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ project })
+    });
+
+    const taskId = String(data.task_id || '');
+    if (!taskId) {
+        throw new Error(msg(data.message, 'Cannot start backup'));
+    }
+
+    while (true) {
+        await sleep(800);
+        const status = await apiGet('/api/project/backup_status');
+        if (String(status.id || '') !== taskId) continue;
+
+        if (typeof progressRenderer === 'function') {
+            progressRenderer(status);
+        }
+
+        if (status.status === 'success') {
+            return status;
+        }
+        if (status.status === 'failed') {
+            throw new Error(msg(status.message, 'Backup failed'));
+        }
+    }
+}
+
+async function backupSelectedProjects() {
+    const projects = Array.from(selectedProjects);
+    if (projects.length === 0) {
+        alert(t('selected_none'));
+        return;
+    }
+
+    try {
+        for (let i = 0; i < projects.length; i += 1) {
+            const project = String(projects[i] || '');
+            await runBackupTask(project, (status) => {
+                const overall = ((i + ((Number(status.progress || 0)) / 100)) / projects.length) * 100;
+                const etaText = status.eta_sec === null || status.eta_sec === undefined
+                    ? `${project} (${i + 1}/${projects.length})`
+                    : `${project} (${i + 1}/${projects.length}) | ${t('backup_eta')}: ${fmtEtaSeconds(status.eta_sec)}`;
+                setUploadProgress(overall, t('backup_batch_progress'), etaText);
+            });
+        }
+        setUploadProgress(100, t('backup_batch_done'), `${projects.length} project(s)`);
+        await sleep(600);
+        hideUploadProgress();
+        alert(t('backup_batch_done'));
+    } catch (e) {
+        hideUploadProgress();
+        alert(String(e.message || e));
+    }
+}
+
+function uploadFileWithProgress(url, file, extraFields = {}, progressText = null) {
+    return new Promise((resolve, reject) => {
+        const xhr = new XMLHttpRequest();
+        const fd = new FormData();
+        fd.append('file', file);
+        Object.entries(extraFields || {}).forEach(([key, value]) => {
+            fd.append(key, value);
+        });
+
+        xhr.open('POST', url);
+        xhr.responseType = 'json';
+        xhr.withCredentials = true;
+
+        xhr.upload.onprogress = (e) => {
+            if (e.lengthComputable) {
+                const pct = (e.loaded / e.total) * 100;
+                setUploadProgress(pct, progressText || t('uploading'));
+            } else {
+                setUploadProgress(0, progressText || t('uploading'));
+            }
+        };
+
+        xhr.onload = () => {
+            const resp = xhr.response || {};
+            if (xhr.status >= 200 && xhr.status < 300) {
+                resolve(resp);
+                return;
+            }
+            reject(new Error(msg(resp.message, `HTTP ${xhr.status}`)));
+        };
+
+        xhr.onerror = () => reject(new Error('Network error while uploading'));
+        xhr.onabort = () => reject(new Error('Upload aborted'));
+
+        xhr.send(fd);
+    });
+}
+
 async function handleProjectUploadInput(inputEl) {
     try {
         const file = inputEl && inputEl.files && inputEl.files[0];
         if (!file) return;
 
-        const fd = new FormData();
-        fd.append('file', file);
-
-        const data = await apiGet('/api/upload_project', {
-            method: 'POST',
-            body: fd
-        });
+        setUploadProgress(0, t('uploading'));
+        const data = await uploadFileWithProgress('/api/upload_project', file, {}, t('uploading'));
 
         alert(msg(data.message, 'Upload success'));
         await refreshAll();
@@ -2031,6 +2400,43 @@ async function handleProjectUploadInput(inputEl) {
         alert(String(e.message || e));
     } finally {
         if (inputEl) inputEl.value = '';
+        hideUploadProgress();
+    }
+}
+
+function openProjectDataUpload(encodedName) {
+    const input = document.getElementById('projectDataZipInput');
+    if (!input) return;
+    pendingProjectDataUpload = decodeURIComponent(encodedName);
+    input.value = '';
+    input.click();
+}
+
+async function handleProjectDataUploadInput(inputEl) {
+    try {
+        const file = inputEl && inputEl.files && inputEl.files[0];
+        const project = String(pendingProjectDataUpload || '');
+        if (!file || !project) return;
+
+        setUploadProgress(0, t('uploading_data'));
+        const data = await uploadFileWithProgress(
+            '/api/project/import_data_zip',
+            file,
+            { project },
+            t('uploading_data')
+        );
+
+        projectDetailCache.delete(project);
+        expandedProjects.add(project);
+        alert(msg(data.message, 'Data imported'));
+        await ensureProjectDetailLoaded(project);
+        await refreshAll();
+    } catch (e) {
+        alert(String(e.message || e));
+    } finally {
+        pendingProjectDataUpload = '';
+        if (inputEl) inputEl.value = '';
+        hideUploadProgress();
     }
 }
 
@@ -2107,7 +2513,21 @@ async function watchStateChanges() {
 }
 
 applyLanguage();
+applyToolbarIcons();
+applySidePanelState();
+updateStickyLayoutMetrics();
+window.addEventListener('resize', updateStickyLayoutMetrics);
+if (typeof ResizeObserver !== 'undefined') {
+    const stickyPanel = document.querySelector('.sticky-top-panel');
+    if (stickyPanel) {
+        new ResizeObserver(() => updateStickyLayoutMetrics()).observe(stickyPanel);
+    }
+    const projectBadges = document.getElementById('projectSummaryBadges');
+    if (projectBadges) {
+        new ResizeObserver(() => updateStickyLayoutMetrics()).observe(projectBadges);
+    }
+}
 refreshAll().finally(() => {
+    updateStickyLayoutMetrics();
     watchStateChanges();
 });
-

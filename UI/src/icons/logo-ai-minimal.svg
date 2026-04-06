@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" fill="none">
+  <rect x="34" y="34" width="60" height="60" rx="8" stroke="#E5E7EB" stroke-width="3"/>
+  <path d="M46 82 56 46h8l10 36h-6.8l-2.2-8h-10l-2.2 8H46Zm10.6-13.5h7L60.1 55l-3.5 13.5Z" fill="#E5E7EB"/>
+  <path d="M79 46v36" stroke="#E5E7EB" stroke-width="3" stroke-linecap="round"/>
+  <path d="M18 46h16M10 64h24M18 82h16M110 46H94M118 64H94M110 82H94M46 18v16M64 10v24M82 18v16M46 110V94M64 118V94M82 110V94" stroke="#94A3B8" stroke-width="3" stroke-linecap="round"/>
+  <circle cx="18" cy="46" r="4" stroke="#E5E7EB" stroke-width="3"/>
+  <circle cx="10" cy="64" r="4" stroke="#E5E7EB" stroke-width="3"/>
+  <circle cx="18" cy="82" r="4" stroke="#E5E7EB" stroke-width="3"/>
+  <circle cx="110" cy="46" r="4" stroke="#E5E7EB" stroke-width="3"/>
+  <circle cx="118" cy="64" r="4" stroke="#E5E7EB" stroke-width="3"/>
+  <circle cx="110" cy="82" r="4" stroke="#E5E7EB" stroke-width="3"/>
+  <circle cx="46" cy="18" r="4" stroke="#E5E7EB" stroke-width="3"/>
+  <circle cx="64" cy="10" r="4" stroke="#E5E7EB" stroke-width="3"/>
+  <circle cx="82" cy="18" r="4" stroke="#E5E7EB" stroke-width="3"/>
+  <circle cx="46" cy="110" r="4" stroke="#E5E7EB" stroke-width="3"/>
+  <circle cx="64" cy="118" r="4" stroke="#E5E7EB" stroke-width="3"/>
+  <circle cx="82" cy="110" r="4" stroke="#E5E7EB" stroke-width="3"/>
+</svg>

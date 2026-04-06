@@ -1,2 +1,6 @@
 {"time": "2026-04-03 22:35:22", "user": "admin", "ip": "127.0.0.1", "action": "stop_current_train", "status": "failed", "project": "", "target": "", "details": "No running project"}
 {"time": "2026-04-03 22:35:22", "user": "admin", "ip": "127.0.0.1", "action": "project_revalidate_run", "status": "failed", "project": "missing", "target": "Model_Train", "details": "Run folder not found"}
+{"time": "2026-04-06 10:33:58", "user": "admin", "ip": "127.0.0.1", "action": "lv2_verify", "status": "success", "project": "", "target": "", "details": "LV2 verified"}
+{"time": "2026-04-06 10:33:58", "user": "admin", "ip": "127.0.0.1", "action": "project_delete", "status": "success", "project": "testUpload2", "target": "", "details": "Project deleted"}
+{"time": "2026-04-06 16:17:21", "user": "admin", "ip": "127.0.0.1", "action": "lv2_verify", "status": "success", "project": "", "target": "", "details": "LV2 verified"}
+{"time": "2026-04-06 16:17:21", "user": "admin", "ip": "127.0.0.1", "action": "history_clear", "status": "success", "project": "", "target": "", "details": "Training history cleared"}
