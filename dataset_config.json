@@ -1,0 +1,9 @@
+{
+  "train_percent": 90,
+  "valid_percent": 10,
+  "test_percent": 0,
+  "shuffle": true,
+  "seed": 42,
+  "split_by_class": false,
+  "train_all_data": false
+}

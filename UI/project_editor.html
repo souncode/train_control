@@ -1,0 +1,898 @@
+﻿<!doctype html>
+<html lang="vi">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Project Editor - {{ project_name }}</title>
+    <style>
+        :root {
+            --bg: #0b1220;
+            --panel: #111a2e;
+            --line: #25324a;
+            --text: #e6edf8;
+            --muted: #8ea0ba;
+            --primary: #3b82f6;
+            --ok: #16a34a;
+            --danger: #ef4444;
+        }
+        * { box-sizing: border-box; }
+        body {
+            margin: 0;
+            font-family: "Segoe UI", Arial, sans-serif;
+            background: linear-gradient(180deg, #0a1120 0%, #0b1220 100%);
+            color: var(--text);
+        }
+        .container {
+            max-width: 1880px;
+            margin: 0 auto;
+            padding: 18px;
+        }
+        .top {
+            display: flex;
+            gap: 12px;
+            align-items: center;
+            justify-content: space-between;
+            flex-wrap: wrap;
+            margin-bottom: 14px;
+        }
+        .title { font-size: 20px; font-weight: 800; }
+        .small { color: var(--muted); font-size: 12px; }
+        .actions { display: flex; gap: 8px; flex-wrap: wrap; }
+        button {
+            border: 0;
+            border-radius: 10px;
+            padding: 9px 13px;
+            font-weight: 700;
+            cursor: pointer;
+        }
+        .btn-primary { background: var(--primary); color: #fff; }
+        .btn-light { background: #1a2438; color: var(--text); border: 1px solid #2c3b55; }
+        .btn-ok { background: var(--ok); color: #05200d; }
+        .btn-danger { background: var(--danger); color: #fff; }
+
+        .layout {
+            display: grid;
+            grid-template-columns: 1.8fr 0.9fr;
+            gap: 14px;
+        }
+        .layout-control {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin: 10px 0 14px;
+            flex-wrap: wrap;
+        }
+        .action-toolbar {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin: -2px 0 14px;
+            flex-wrap: wrap;
+        }
+        .layout-control label {
+            font-size: 12px;
+            color: var(--muted);
+        }
+        .layout-control input[type=\"range\"] {
+            width: 260px;
+        }
+        .card {
+            border: 1px solid var(--line);
+            border-radius: 14px;
+            background: var(--panel);
+            padding: 12px;
+        }
+
+        .canvas-wrap {
+            width: 100%;
+            min-height: 700px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border: 1px dashed #2f405f;
+            border-radius: 12px;
+            background: #0c1425;
+            overflow: auto;
+            position: relative;
+        }
+        #editorCanvas {
+            display: block;
+            max-width: 100%;
+            height: auto;
+            cursor: crosshair;
+            background: #0b1220;
+        }
+
+        .field { margin-top: 10px; }
+        .field label {
+            display: block;
+            margin-bottom: 6px;
+            font-size: 12px;
+            color: var(--muted);
+        }
+        input, select, textarea {
+            width: 100%;
+            border: 1px solid #304160;
+            border-radius: 10px;
+            padding: 9px 10px;
+            background: #0f182a;
+            color: var(--text);
+        }
+        textarea {
+            min-height: 130px;
+            resize: vertical;
+            font-family: Consolas, monospace;
+            font-size: 12px;
+        }
+
+        .row { display: flex; gap: 8px; align-items: center; }
+        .row.wrap { flex-wrap: wrap; }
+
+        .class-list {
+            border: 1px solid #2f405f;
+            border-radius: 10px;
+            background: #0f182a;
+            padding: 8px 10px;
+            max-height: 150px;
+            overflow: auto;
+            font-family: Consolas, monospace;
+            font-size: 12px;
+            line-height: 1.45;
+        }
+        .image-list {
+            border: 1px solid #2f405f;
+            border-radius: 10px;
+            background: #0f182a;
+            max-height: 260px;
+            overflow: auto;
+        }
+        .image-item {
+            padding: 8px 10px;
+            border-bottom: 1px solid #1f2b41;
+            font-size: 12px;
+            cursor: pointer;
+            display: flex;
+            justify-content: space-between;
+            gap: 8px;
+        }
+        .image-item:last-child { border-bottom: 0; }
+        .image-item.active { background: #1a2740; }
+        .image-item-meta { color: #8ea0ba; font-size: 11px; }
+
+        .box-list {
+            border: 1px solid #2f405f;
+            border-radius: 10px;
+            background: #0f182a;
+            max-height: 220px;
+            overflow: auto;
+        }
+        .box-item {
+            padding: 8px 10px;
+            border-bottom: 1px solid #1f2b41;
+            font-size: 12px;
+            cursor: pointer;
+            display: flex;
+            justify-content: space-between;
+            gap: 8px;
+        }
+        .box-item:last-child { border-bottom: 0; }
+        .box-item.active { background: #1a2740; }
+
+        .status-line {
+            margin-top: 8px;
+            font-size: 12px;
+            color: #9dd6ff;
+        }
+        .hint { color: #93a4bf; font-size: 12px; margin-top: 6px; }
+        .image-info {
+            margin-top: 10px;
+            border: 1px solid #2c3b55;
+            border-radius: 10px;
+            background: #0f182a;
+            padding: 10px;
+            font-size: 12px;
+            line-height: 1.5;
+        }
+        .image-info a {
+            color: #7cc6ff;
+            text-decoration: none;
+            word-break: break-all;
+        }
+        .image-info a:hover { text-decoration: underline; }
+
+        @media (max-width: 1100px) {
+            .layout { grid-template-columns: 1fr; }
+            .canvas-wrap { min-height: 360px; }
+        }
+    </style>
+</head>
+<body>
+<div class="container">
+    <div class="top">
+        <div>
+            <div class="title">Project Label Editor</div>
+            <div class="small">Project: <b>{{ project_name }}</b></div>
+        </div>
+        <div class="actions">
+            <button class="btn-light" onclick="window.location.href='/'">Back</button>
+        </div>
+    </div>
+
+    <div class="layout-control">
+        <label for="layoutRatio">Độ rộng khung ảnh</label>
+        <input id="layoutRatio" type="range" min="1.2" max="2.4" step="0.05" value="1.8" oninput="onLayoutRatioChanged(this.value)">
+        <span class="small" id="layoutRatioText">1.8fr</span>
+    </div>
+
+    <div class="action-toolbar">
+        <button class="btn-ok" onclick="saveLabel()">Save ảnh</button>
+        <button class="btn-primary" onclick="nextImage()">Next ảnh</button>
+        <button class="btn-light" onclick="selectAllBoxes()">Select all</button>
+        <button class="btn-danger" onclick="deleteSelectedBoxes()">Xóa bbox đã chọn</button>
+        <button class="btn-danger" onclick="deleteSelectedBox()">Xóa bbox hiện tại</button>
+        <button class="btn-light" id="toggleBboxBtn" onclick="toggleBboxVisible()">Ẩn bbox</button>
+    </div>
+
+    <div class="layout">
+        <div class="card">
+            <div class="canvas-wrap">
+                <canvas id="editorCanvas"></canvas>
+            </div>
+            <div class="status-line" id="statusLine">Loading...</div>
+            <div class="hint">Kéo thả bbox để đổi vị trí. Click bbox để chọn.</div>
+            <div class="image-info" id="imageInfo">
+                <div><b>Tên:</b> -</div>
+                <div><b>Ngày sửa:</b> -</div>
+                <div><b>Link:</b> -</div>
+                <div><b>Tổng ảnh:</b> -</div>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="field">
+                <label>Ảnh (toàn bộ)</label>
+                <input id="imageSearch" type="text" placeholder="Tìm theo tên ảnh..." oninput="onImageSearchChanged()" />
+            </div>
+
+            <div class="field">
+                <label>Danh sách ảnh</label>
+                <div class="row wrap" style="margin-bottom:8px;">
+                    <button class="btn-light" onclick="prevPage()">Prev page</button>
+                    <button class="btn-light" onclick="nextPage()">Next page</button>
+                    <span class="small" id="pageInfo">Page -/-</span>
+                </div>
+                <div class="row wrap" style="margin-bottom:8px;">
+                    <select id="sortBy" onchange="onSortChanged()">
+                        <option value="name">Sort: Name</option>
+                        <option value="date">Sort: Date</option>
+                        <option value="class">Sort: Class</option>
+                    </select>
+                    <select id="sortDir" onchange="onSortChanged()">
+                        <option value="asc">ASC</option>
+                        <option value="desc">DESC</option>
+                    </select>
+                    <select id="classFilter" onchange="onClassFilterChanged()">
+                        <option value="">Filter class: All</option>
+                    </select>
+                </div>
+                <div class="image-list" id="imageList"></div>
+            </div>
+
+            <div class="field">
+                <label>Class list (từ class.txt)</label>
+                <div class="class-list" id="classList">Loading classes...</div>
+            </div>
+
+            <div class="field">
+                <label>Bounding boxes</label>
+                <div class="box-list" id="boxList"></div>
+            </div>
+
+            <div class="field">
+                <label>Class của bbox đang chọn</label>
+                <div class="row">
+                    <select id="boxClassSelect" onchange="changeSelectedBoxClass()"></select>
+                </div>
+            </div>
+
+            <div class="field">
+                <label>Raw label (.txt)</label>
+                <textarea id="rawLabel" readonly></textarea>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+const projectName = {{ project_name | tojson }};
+let images = [];
+let imageItems = [];
+let idx = 0;
+let classes = [];
+let currentPage = 1;
+let pageSize = 200;
+let totalImages = 0;
+let totalPages = 0;
+let currentQuery = '';
+let sortBy = 'name';
+let sortDir = 'asc';
+let classFilter = '';
+let layoutLeftFr = 1.8;
+let bboxVisible = true;
+
+let canvas = null;
+let ctx = null;
+let baseImg = null;
+let drawW = 0;
+let drawH = 0;
+
+let boxes = []; // [{cls, x, y, w, h}] in canvas pixels
+let selectedBox = -1;
+let selectedBoxes = new Set();
+let dragging = false;
+let drawMode = 'none'; // none | move | resize | draw
+let resizeHandle = ''; // nw|ne|sw|se
+let dragStart = {x: 0, y: 0};
+let dragOffset = {x: 0, y: 0};
+
+function esc(text) {
+    return String(text ?? '')
+        .replaceAll('&', '&amp;')
+        .replaceAll('<', '&lt;')
+        .replaceAll('>', '&gt;')
+        .replaceAll('"', '&quot;')
+        .replaceAll("'", '&#039;');
+}
+
+async function apiGet(url, opts = {}) {
+    const res = await fetch(url, opts);
+    const data = await res.json();
+    if (!res.ok || data.ok === false) {
+        throw new Error(data.message || `HTTP ${res.status}`);
+    }
+    return data;
+}
+
+function setStatus(text) {
+    document.getElementById('statusLine').textContent = text;
+}
+
+function applyLayoutRatio(leftFrRaw) {
+    const leftFr = Math.max(1.2, Math.min(2.4, Number(leftFrRaw || 1.8)));
+    layoutLeftFr = leftFr;
+    const rightFr = Math.max(0.7, 3.0 - leftFr);
+
+    const layout = document.querySelector('.layout');
+    if (layout) {
+        if (window.innerWidth <= 1100) {
+            layout.style.gridTemplateColumns = '1fr';
+        } else {
+            layout.style.gridTemplateColumns = `${leftFr.toFixed(2)}fr ${rightFr.toFixed(2)}fr`;
+        }
+    }
+
+    const txt = document.getElementById('layoutRatioText');
+    if (txt) txt.textContent = `${leftFr.toFixed(2)}fr`;
+}
+
+function onLayoutRatioChanged(v) {
+    applyLayoutRatio(v);
+    try {
+        localStorage.setItem('project_editor_left_fr', String(layoutLeftFr));
+    } catch (e) {
+        // ignore storage errors
+    }
+}
+
+function setImageInfo(name, modifiedAt, linkHref) {
+    const box = document.getElementById('imageInfo');
+    if (!box) return;
+    const safeName = esc(name || '-');
+    const safeDate = esc(modifiedAt || '-');
+    const safeLink = esc(linkHref || '-');
+    box.innerHTML = `
+        <div><b>Tên:</b> ${safeName}</div>
+        <div><b>Ngày sửa:</b> ${safeDate}</div>
+        <div><b>Link:</b> ${safeLink}</div>
+        <div><b>Tổng ảnh:</b> ${totalImages}</div>
+    `;
+}
+
+function updatePageInfo() {
+    const el = document.getElementById('pageInfo');
+    if (!el) return;
+    el.textContent = `Page ${currentPage}/${Math.max(1, totalPages)} • ${images.length}/${totalImages}`;
+}
+
+function toggleBboxVisible() {
+    bboxVisible = !bboxVisible;
+    const btn = document.getElementById('toggleBboxBtn');
+    if (btn) btn.textContent = bboxVisible ? 'Ẩn bbox' : 'Hiện bbox';
+    draw();
+}
+
+function classNameByIndex(i) {
+    if (i >= 0 && i < classes.length) return classes[i];
+    return `class_${i}`;
+}
+
+function clamp(v, min, max) {
+    return Math.max(min, Math.min(max, v));
+}
+
+function canvasPointFromEvent(e) {
+    const rect = canvas.getBoundingClientRect();
+    const x = (e.clientX - rect.left) * (canvas.width / rect.width);
+    const y = (e.clientY - rect.top) * (canvas.height / rect.height);
+    return { x, y };
+}
+
+function hitBoxIndex(x, y) {
+    for (let i = boxes.length - 1; i >= 0; i--) {
+        const b = boxes[i];
+        if (x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h) {
+            return i;
+        }
+    }
+    return -1;
+}
+
+function handlePoints(b) {
+    return {
+        nw: {x: b.x, y: b.y},
+        ne: {x: b.x + b.w, y: b.y},
+        sw: {x: b.x, y: b.y + b.h},
+        se: {x: b.x + b.w, y: b.y + b.h},
+    };
+}
+
+function hitResizeHandle(x, y, b) {
+    const pts = handlePoints(b);
+    const r = 9;
+    for (const key of ['nw', 'ne', 'sw', 'se']) {
+        const p = pts[key];
+        if (Math.abs(x - p.x) <= r && Math.abs(y - p.y) <= r) {
+            return key;
+        }
+    }
+    return '';
+}
+
+function parseYoloLabel(text) {
+    const rows = [];
+    const lines = String(text || '').replace(/\r\n/g, '\n').split('\n');
+    for (const line of lines) {
+        const s = line.trim();
+        if (!s) continue;
+        const parts = s.split(/\s+/);
+        if (parts.length < 5) continue;
+
+        const cls = parseInt(parts[0], 10);
+        const cx = parseFloat(parts[1]);
+        const cy = parseFloat(parts[2]);
+        const w = parseFloat(parts[3]);
+        const h = parseFloat(parts[4]);
+
+        if ([cls, cx, cy, w, h].some(v => Number.isNaN(v))) continue;
+
+        const bw = clamp(w, 0, 1) * drawW;
+        const bh = clamp(h, 0, 1) * drawH;
+        const x = clamp(cx, 0, 1) * drawW - bw / 2;
+        const y = clamp(cy, 0, 1) * drawH - bh / 2;
+        rows.push({
+            cls: Math.max(0, cls),
+            x: clamp(x, 0, Math.max(0, drawW - bw)),
+            y: clamp(y, 0, Math.max(0, drawH - bh)),
+            w: clamp(bw, 1, drawW),
+            h: clamp(bh, 1, drawH),
+        });
+    }
+    return rows;
+}
+
+function toYoloText() {
+    return boxes.map(b => {
+        const cx = (b.x + b.w / 2) / drawW;
+        const cy = (b.y + b.h / 2) / drawH;
+        const w = b.w / drawW;
+        const h = b.h / drawH;
+        return `${Math.max(0, Math.floor(b.cls))} ${cx.toFixed(6)} ${cy.toFixed(6)} ${w.toFixed(6)} ${h.toFixed(6)}`;
+    }).join('\n');
+}
+
+function renderRawText() {
+    document.getElementById('rawLabel').value = toYoloText();
+}
+
+function renderBoxList() {
+    const boxList = document.getElementById('boxList');
+    if (!boxes.length) {
+        boxList.innerHTML = '<div class="box-item">No boxes</div>';
+        return;
+    }
+
+    boxList.innerHTML = boxes.map((b, i) => {
+        const active = selectedBoxes.has(i) ? 'active' : '';
+        const info = `${Math.round(b.x)},${Math.round(b.y)} ${Math.round(b.w)}x${Math.round(b.h)}`;
+        return `<div class="box-item ${active}" onclick="selectBox(${i})"><span>#${i + 1} - ${esc(classNameByIndex(b.cls))}</span><span>${info}</span></div>`;
+    }).join('');
+}
+
+function renderClassSelect() {
+    const sel = document.getElementById('boxClassSelect');
+    if (!classes.length) {
+        sel.innerHTML = '<option value="0">0</option>';
+    } else {
+        sel.innerHTML = classes.map((c, i) => `<option value="${i}">${i}: ${esc(c)}</option>`).join('');
+    }
+
+    if (selectedBox >= 0 && boxes[selectedBox]) {
+        sel.value = String(boxes[selectedBox].cls);
+    }
+}
+
+function draw() {
+    if (!ctx || !baseImg) return;
+    ctx.clearRect(0, 0, drawW, drawH);
+    ctx.drawImage(baseImg, 0, 0, drawW, drawH);
+
+    if (!bboxVisible) {
+        renderBoxList();
+        renderClassSelect();
+        renderRawText();
+        return;
+    }
+
+    boxes.forEach((b, i) => {
+        const active = selectedBoxes.has(i);
+        ctx.lineWidth = active ? 3 : 2;
+        ctx.strokeStyle = active ? '#22c55e' : '#3b82f6';
+        ctx.fillStyle = active ? 'rgba(34,197,94,0.16)' : 'rgba(59,130,246,0.16)';
+
+        ctx.fillRect(b.x, b.y, b.w, b.h);
+        ctx.strokeRect(b.x, b.y, b.w, b.h);
+
+        const label = `${b.cls}: ${classNameByIndex(b.cls)}`;
+        ctx.font = '12px Segoe UI';
+        const tw = ctx.measureText(label).width + 10;
+        const th = 18;
+        const tx = b.x;
+        const ty = Math.max(0, b.y - th);
+        ctx.fillStyle = active ? 'rgba(34,197,94,0.95)' : 'rgba(59,130,246,0.95)';
+        ctx.fillRect(tx, ty, tw, th);
+        ctx.fillStyle = '#001020';
+        ctx.fillText(label, tx + 5, ty + 13);
+
+        if (i === selectedBox) {
+            const pts = handlePoints(b);
+            ctx.fillStyle = '#22c55e';
+            for (const key of ['nw', 'ne', 'sw', 'se']) {
+                const p = pts[key];
+                ctx.fillRect(p.x - 4, p.y - 4, 8, 8);
+            }
+        }
+    });
+
+    renderBoxList();
+    renderClassSelect();
+    renderRawText();
+}
+
+function selectBox(i) {
+    selectedBox = i;
+    selectedBoxes = new Set([i]);
+    draw();
+}
+
+function changeSelectedBoxClass() {
+    if (selectedBox < 0 || !boxes[selectedBox]) return;
+    const sel = document.getElementById('boxClassSelect');
+    const cls = parseInt(sel.value, 10);
+    if (Number.isNaN(cls)) return;
+    boxes[selectedBox].cls = cls;
+    draw();
+}
+
+function deleteSelectedBox() {
+    if (selectedBox < 0 || !boxes[selectedBox]) return;
+    boxes.splice(selectedBox, 1);
+    selectedBoxes = new Set();
+    selectedBox = boxes.length ? Math.min(selectedBox, boxes.length - 1) : -1;
+    if (selectedBox >= 0) selectedBoxes.add(selectedBox);
+    draw();
+}
+
+function selectAllBoxes() {
+    selectedBoxes = new Set(boxes.map((_, i) => i));
+    selectedBox = boxes.length ? 0 : -1;
+    draw();
+}
+
+function deleteSelectedBoxes() {
+    if (!selectedBoxes.size) return;
+    boxes = boxes.filter((_, i) => !selectedBoxes.has(i));
+    selectedBoxes = new Set();
+    selectedBox = boxes.length ? 0 : -1;
+    if (selectedBox >= 0) selectedBoxes.add(selectedBox);
+    draw();
+}
+
+async function loadClasses() {
+    try {
+        const data = await apiGet(`/api/project_classes?project=${encodeURIComponent(projectName)}`);
+        classes = Array.isArray(data.classes) ? data.classes : [];
+        if (classes.length === 0) {
+            document.getElementById('classList').textContent = 'Không tìm thấy class.txt hoặc classes.txt';
+        } else {
+            document.getElementById('classList').innerHTML = classes.map((x, i) => `${i}: ${esc(x)}`).join('<br>');
+        }
+        const filterSel = document.getElementById('classFilter');
+        if (filterSel) {
+            const old = filterSel.value;
+            let html = '<option value=\"\">Filter class: All</option>';
+            html += classes.map((x, i) => `<option value=\"${i}\">${i}: ${esc(x)}</option>`).join('');
+            filterSel.innerHTML = html;
+            filterSel.value = old && old !== '' ? old : '';
+        }
+        renderClassSelect();
+    } catch (e) {
+        document.getElementById('classList').textContent = String(e.message || e);
+    }
+}
+
+function renderImageList() {
+    const box = document.getElementById('imageList');
+    if (!box) return;
+    if (!imageItems.length) {
+        box.innerHTML = '<div class=\"image-item\">Không có ảnh</div>';
+        return;
+    }
+
+    box.innerHTML = imageItems.map((it, i) => {
+        const active = i === idx ? 'active' : '';
+        const clsText = Array.isArray(it.class_ids) && it.class_ids.length ? it.class_ids.join(',') : '-';
+        return `<div class=\"image-item ${active}\" onclick=\"selectImageByIndex(${i})\"><span>${i + 1}. ${esc(it.name || it.rel)}</span><span class=\"image-item-meta\">${esc(it.modified_at || '-')} • cls:${esc(clsText)}</span></div>`;
+    }).join('');
+}
+
+async function loadImages(page = 1, query = currentQuery) {
+    currentQuery = String(query || '').trim();
+    const data = await apiGet(`/api/project_images?project=${encodeURIComponent(projectName)}&page=${page}&page_size=${pageSize}&q=${encodeURIComponent(currentQuery)}&sort_by=${encodeURIComponent(sortBy)}&sort_dir=${encodeURIComponent(sortDir)}&class_filter=${encodeURIComponent(classFilter)}`);
+    images = Array.isArray(data.images) ? data.images : [];
+    imageItems = Array.isArray(data.items) ? data.items : images.map(rel => ({rel, name: rel, modified_at: '-', class_ids: []}));
+    currentPage = Number(data.page || 1);
+    totalImages = Number(data.total || 0);
+    totalPages = Number(data.total_pages || 0);
+    updatePageInfo();
+    if (!images.length) {
+        renderImageList();
+        setStatus('Không có ảnh trong thư mục image/images');
+        setImageInfo('-', '-', '');
+        return;
+    }
+    idx = 0;
+    renderImageList();
+    await loadCurrentImageAndLabel();
+}
+
+function onImageSearchChanged() {
+    const keyword = String(document.getElementById('imageSearch').value || '').trim().toLowerCase();
+    loadImages(1, keyword);
+}
+
+function onSortChanged() {
+    sortBy = String(document.getElementById('sortBy').value || 'name');
+    sortDir = String(document.getElementById('sortDir').value || 'asc');
+    loadImages(1, currentQuery);
+}
+
+function onClassFilterChanged() {
+    classFilter = String(document.getElementById('classFilter').value || '');
+    loadImages(1, currentQuery);
+}
+
+async function prevPage() {
+    if (currentPage <= 1) return;
+    await loadImages(currentPage - 1, currentQuery);
+}
+
+async function nextPage() {
+    if (currentPage >= totalPages) return;
+    await loadImages(currentPage + 1, currentQuery);
+}
+
+async function loadCurrentImageAndLabel() {
+    if (!images[idx]) return;
+    const rel = images[idx];
+
+    const img = new Image();
+    img.src = `/api/project_image_file?project=${encodeURIComponent(projectName)}&rel=${encodeURIComponent(rel)}&t=${Date.now()}`;
+    await new Promise((resolve, reject) => {
+        img.onload = resolve;
+        img.onerror = reject;
+    });
+
+    baseImg = img;
+    const wrap = document.querySelector('.canvas-wrap');
+    const maxW = Math.max(900, Math.floor((wrap ? wrap.clientWidth : 1400) - 24));
+    const maxH = Math.max(650, window.innerHeight - 220);
+    const ratio = Math.min(maxW / img.naturalWidth, maxH / img.naturalHeight, 1);
+    drawW = Math.max(1, Math.round(img.naturalWidth * ratio));
+    drawH = Math.max(1, Math.round(img.naturalHeight * ratio));
+
+    canvas.width = drawW;
+    canvas.height = drawH;
+
+    const data = await apiGet(`/api/project_label?project=${encodeURIComponent(projectName)}&rel=${encodeURIComponent(rel)}`);
+    boxes = parseYoloLabel(data.text || '');
+    selectedBox = boxes.length ? 0 : -1;
+    selectedBoxes = selectedBox >= 0 ? new Set([selectedBox]) : new Set();
+
+    try {
+        const info = await apiGet(`/api/project_image_info?project=${encodeURIComponent(projectName)}&rel=${encodeURIComponent(rel)}`);
+        setImageInfo(info.name, info.modified_at, info.root_link || info.path || '');
+    } catch (e) {
+        setImageInfo(rel, '-', '');
+    }
+
+    draw();
+    setStatus(`Image ${idx + 1}/${images.length}: ${rel}`);
+    renderImageList();
+}
+
+async function selectImageByIndex(i) {
+    idx = Math.max(0, Math.min(Number(i || 0), Math.max(0, images.length - 1)));
+    await loadCurrentImageAndLabel();
+}
+
+async function saveLabel() {
+    if (!images[idx]) return;
+    const rel = images[idx];
+    const text = toYoloText();
+    await apiGet('/api/project_label', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ project: projectName, rel, text })
+    });
+    setStatus(`Đã lưu label: ${rel}`);
+}
+
+async function nextImage() {
+    if (!images.length) return;
+    await saveLabel();
+    if (idx < images.length - 1) {
+        idx += 1;
+        await loadCurrentImageAndLabel();
+    } else if (currentPage < totalPages) {
+        await loadImages(currentPage + 1, currentQuery);
+    } else {
+        setStatus('Đã tới ảnh cuối cùng');
+    }
+}
+
+function onMouseDown(e) {
+    if (!canvas) return;
+    if (!bboxVisible) return;
+    const p = canvasPointFromEvent(e);
+    dragStart = {x: p.x, y: p.y};
+
+    const hit = hitBoxIndex(p.x, p.y);
+    if (hit >= 0) {
+        selectedBox = hit;
+        selectedBoxes = new Set([hit]);
+
+        const h = hitResizeHandle(p.x, p.y, boxes[hit]);
+        if (h) {
+            drawMode = 'resize';
+            resizeHandle = h;
+            dragging = true;
+            draw();
+            return;
+        }
+
+        const b = boxes[hit];
+        drawMode = 'move';
+        dragging = true;
+        dragOffset.x = p.x - b.x;
+        dragOffset.y = p.y - b.y;
+        draw();
+        return;
+    }
+
+    // Draw new bbox on empty area
+    const clsSel = document.getElementById('boxClassSelect');
+    const defaultCls = Number.isNaN(parseInt(clsSel.value, 10)) ? 0 : parseInt(clsSel.value, 10);
+    const newBox = { cls: defaultCls, x: p.x, y: p.y, w: 1, h: 1 };
+    boxes.push(newBox);
+    selectedBox = boxes.length - 1;
+    selectedBoxes = new Set([selectedBox]);
+    drawMode = 'draw';
+    dragging = true;
+    draw();
+}
+
+function onMouseMove(e) {
+    if (!dragging || selectedBox < 0 || !boxes[selectedBox]) return;
+    const p = canvasPointFromEvent(e);
+    const b = boxes[selectedBox];
+
+    if (drawMode === 'move') {
+        b.x = clamp(p.x - dragOffset.x, 0, Math.max(0, drawW - b.w));
+        b.y = clamp(p.y - dragOffset.y, 0, Math.max(0, drawH - b.h));
+    } else if (drawMode === 'draw') {
+        const x1 = clamp(dragStart.x, 0, drawW);
+        const y1 = clamp(dragStart.y, 0, drawH);
+        const x2 = clamp(p.x, 0, drawW);
+        const y2 = clamp(p.y, 0, drawH);
+        b.x = Math.min(x1, x2);
+        b.y = Math.min(y1, y2);
+        b.w = Math.max(1, Math.abs(x2 - x1));
+        b.h = Math.max(1, Math.abs(y2 - y1));
+    } else if (drawMode === 'resize') {
+        let x = b.x, y = b.y, w = b.w, h = b.h;
+        const right = b.x + b.w;
+        const bottom = b.y + b.h;
+
+        if (resizeHandle.includes('n')) y = clamp(p.y, 0, bottom - 1);
+        if (resizeHandle.includes('w')) x = clamp(p.x, 0, right - 1);
+        if (resizeHandle.includes('s')) h = clamp(p.y - b.y, 1, drawH - b.y);
+        if (resizeHandle.includes('e')) w = clamp(p.x - b.x, 1, drawW - b.x);
+
+        if (resizeHandle.includes('n')) h = Math.max(1, bottom - y);
+        if (resizeHandle.includes('w')) w = Math.max(1, right - x);
+
+        b.x = x; b.y = y; b.w = w; b.h = h;
+    }
+
+    draw();
+}
+
+function onMouseUp() {
+    if (drawMode === 'draw' && selectedBox >= 0 && boxes[selectedBox]) {
+        const b = boxes[selectedBox];
+        if (b.w < 4 || b.h < 4) {
+            boxes.splice(selectedBox, 1);
+            selectedBox = boxes.length ? boxes.length - 1 : -1;
+            selectedBoxes = selectedBox >= 0 ? new Set([selectedBox]) : new Set();
+        }
+    }
+    dragging = false;
+    drawMode = 'none';
+    resizeHandle = '';
+    draw();
+}
+
+(function initCanvasEvents() {
+    canvas = document.getElementById('editorCanvas');
+    ctx = canvas.getContext('2d');
+
+    canvas.addEventListener('mousedown', onMouseDown);
+    window.addEventListener('mousemove', onMouseMove);
+    window.addEventListener('mouseup', onMouseUp);
+})();
+
+(function initLayoutRatio() {
+    let start = 1.8;
+    try {
+        const saved = Number(localStorage.getItem('project_editor_left_fr'));
+        if (!Number.isNaN(saved)) start = saved;
+    } catch (e) {
+        // ignore
+    }
+
+    const slider = document.getElementById('layoutRatio');
+    if (slider) slider.value = String(start);
+    applyLayoutRatio(start);
+    window.addEventListener('resize', () => applyLayoutRatio(layoutLeftFr));
+})();
+
+(async function init() {
+    try {
+        await Promise.all([loadClasses(), loadImages()]);
+    } catch (e) {
+        setStatus(String(e.message || e));
+    }
+})();
+</script>
+</body>
+</html>

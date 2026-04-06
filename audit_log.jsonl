@@ -1,0 +1,2 @@
+{"time": "2026-04-03 22:35:22", "user": "admin", "ip": "127.0.0.1", "action": "stop_current_train", "status": "failed", "project": "", "target": "", "details": "No running project"}
+{"time": "2026-04-03 22:35:22", "user": "admin", "ip": "127.0.0.1", "action": "project_revalidate_run", "status": "failed", "project": "missing", "target": "Model_Train", "details": "Run folder not found"}

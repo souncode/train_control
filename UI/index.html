@@ -1,0 +1,280 @@
+﻿<!doctype html>
+<html lang="vi">
+<head>
+    <meta charset="utf-8">
+    <title>AI Train Monitor</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link rel="stylesheet" href="/UI/style.css">
+</head>
+<body>
+<div class="container">
+    <div class="hero">
+        <div class="hero-top">
+            <div>
+                <h1 data-i18n="app_title">AI Train Monitor</h1>
+                <p data-i18n="app_subtitle">Hiá»ƒn thá»‹ project Ä‘ang cháº¡y vĂ  pháº§n trÄƒm train trá»±c tiáº¿p tá»« Train_model_AI.py.</p>
+            </div>
+
+            <div class="lang-wrap">
+                <span class="lang-note">User: {{ auth_user }}</span>
+                <button class="btn-light btn-mini" onclick="logout()" title="Logout">Logout</button>
+                <button class="bell-btn off" id="notifyBell" onclick="toggleNotify()" title="Telegram notification">TG</button>
+                <span class="lang-note" data-i18n="language_label">NgĂ´n ngá»¯</span>
+                <button class="lang-btn active" id="btnLangVi" onclick="setLanguage('vi')">VI</button>
+                <button class="lang-btn" id="btnLangEn" onclick="setLanguage('en')">EN</button>
+                <div class="pill">Port 820</div>
+            </div>
+        </div>
+
+        <div class="hero-stats">
+            <div class="stat">
+                <div class="stat-label" data-i18n="root_dir">ROOT_DIR</div>
+                <div class="stat-value stat-small" id="rootDir">{{ root_dir }}</div>
+            </div>
+            <div class="stat">
+                <div class="stat-label" data-i18n="last_scan">Scan gáº§n nháº¥t</div>
+                <div class="stat-value" id="lastScan">-</div>
+            </div>
+            <div class="stat">
+                <div class="stat-label" data-i18n="current_training">Äang train</div>
+                <div class="stat-value" id="current">-</div>
+            </div>
+            <div class="stat">
+                <div class="stat-label" data-i18n="current_train_percent">% train hiá»‡n táº¡i</div>
+                <div class="stat-value" id="currentProgress">0.0%</div>
+            </div>
+            <div class="stat">
+                <div class="stat-label" data-i18n="project_count">Sá»‘ project</div>
+                <div class="stat-value" id="projectCount">0</div>
+            </div>
+            <div class="stat">
+                <div class="stat-label" data-i18n="train_monitor">Train monitor</div>
+                <div class="stat-value stat-small">{{ train_monitor_url }}</div>
+            </div>
+        </div>
+
+        <div class="summary-badges">
+            <button class="summary-badge badge-all active" id="badgeAll" onclick="setStatusFilter('all')">
+                <span class="summary-label" data-i18n="all_count">All</span>
+                <span class="summary-value" id="countAll">0</span>
+            </button>
+
+            <button class="summary-badge badge-running" id="badgeRunning" onclick="setStatusFilter('running')">
+                <span class="summary-label" data-i18n="running_count">Running</span>
+                <span class="summary-value" id="countRunning">0</span>
+            </button>
+
+            <button class="summary-badge badge-queued" id="badgeQueued" onclick="setStatusFilter('queued')">
+                <span class="summary-label" data-i18n="queued_count">Queued</span>
+                <span class="summary-value" id="countQueued">0</span>
+            </button>
+
+            <button class="summary-badge badge-success" id="badgeSuccess" onclick="setStatusFilter('success')">
+                <span class="summary-label" data-i18n="success_count">Success</span>
+                <span class="summary-value" id="countSuccess">0</span>
+            </button>
+
+            <button class="summary-badge badge-failed" id="badgeFailed" onclick="setStatusFilter('failed')">
+                <span class="summary-label" data-i18n="failed_count">Failed</span>
+                <span class="summary-value" id="countFailed">0</span>
+            </button>
+
+            <button class="summary-badge badge-failed" id="badgeStopped" onclick="setStatusFilter('stopped')">
+                <span class="summary-label" data-i18n="stopped_count">Stopped</span>
+                <span class="summary-value" id="countStopped">0</span>
+            </button>
+
+            <button class="summary-badge badge-idle" id="badgeIdle" onclick="setStatusFilter('idle')">
+                <span class="summary-label" data-i18n="idle_count">Idle</span>
+                <span class="summary-value" id="countIdle">0</span>
+            </button>
+        </div>
+    </div>
+
+    <div class="toolbar">
+        <button class="btn-primary" onclick="scanProjects()" data-i18n="scan_projects">QuĂ©t project</button>
+        <button class="btn-success" onclick="openProjectUpload()" data-i18n="upload_project">Upload project (.zip)</button>
+        <input id="projectZipInput" type="file" accept=".zip,application/zip" style="display:none" onchange="handleProjectUploadInput(this)">
+        <button class="btn-success" onclick="queueSelected()" data-i18n="train_selected">Train project Ä‘Ă£ chá»n</button>
+        <button class="btn-success" onclick="downloadSuccessOutputs()" data-i18n="download_success_outputs">Download success outputs</button>
+        <button class="btn-warning" onclick="queueAll()" data-i18n="train_all">Train táº¥t cáº£</button>
+        <button class="btn-danger" onclick="retryFailed()" data-i18n="retry_failed">Retry failed</button>
+        <button class="btn-danger" onclick="clearHistory()" data-i18n="clear_history">Clear history</button>
+        <button class="btn-warning" onclick="stopCurrentTrain()" data-i18n="stop_current_train">Stop current train</button>
+        <button class="btn-danger-dark" onclick="stopQueue()" data-i18n="stop_queue">Stop queue</button>
+        <button class="btn-light" onclick="selectAllProjects()" data-i18n="select_all">Chá»n táº¥t cáº£</button>
+        <button class="btn-light" onclick="clearAllProjects()" data-i18n="clear_all">Bá» chá»n táº¥t cáº£</button>
+        <button class="btn-light" onclick="expandAllProjects()" data-i18n="expand_all">Má»Ÿ táº¥t cáº£</button>
+        <button class="btn-light" onclick="collapseAllProjects()" data-i18n="collapse_all">Thu gá»n táº¥t cáº£</button>
+        <button class="btn-dark" onclick="refreshAll()" data-i18n="refresh">Refresh</button>
+    </div>
+
+    <div id="uploadProgressWrap" class="upload-progress-wrap hidden">
+        <div class="upload-progress-head">
+            <span id="uploadProgressText">Uploading...</span>
+            <span id="uploadProgressValue">0%</span>
+        </div>
+        <div class="upload-progress-bar">
+            <div id="uploadProgressFill" class="upload-progress-fill"></div>
+        </div>
+    </div>
+
+    <div class="filter-bar">
+        <input
+            id="searchInput"
+            class="search-input"
+            type="text"
+            placeholder="Search project..."
+            oninput="setSearchQuery(this.value)"
+        />
+
+        <select id="statusFilter" class="filter-select" onchange="setStatusFilter(this.value)">
+            <option value="all">All status</option>
+            <option value="idle">idle</option>
+            <option value="queued">queued</option>
+            <option value="running">running</option>
+            <option value="success">success</option>
+            <option value="failed">failed</option>
+            <option value="stopped">stopped</option>
+        </select>
+    </div>
+
+    <div class="layout">
+        <div>
+            <div class="card">
+                <div class="card-title">
+                    <h3 data-i18n="project_list">Danh sĂ¡ch project</h3>
+                    <div class="small" data-i18n="project_list_desc">Báº¥m vĂ o tĂªn project Ä‘á»ƒ xem sá»‘ lÆ°á»£ng áº£nh vĂ  file weights trong Output</div>
+                </div>
+
+                <div class="selected-bar">
+                    <div>
+                        <span data-i18n="selected_count_prefix">ÄĂ£ chá»n:</span>
+                        <b id="selectedCount">0</b>
+                        <span data-i18n="selected_count_suffix">project</span>
+                    </div>
+                    <div class="small">
+                        <span data-i18n="showing_count">Hiá»ƒn thá»‹:</span>
+                        <b id="visibleCount">0</b>
+                    </div>
+                </div>
+
+                <div class="table-wrap">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th class="col-stt">#</th>
+                                <th class="col-check">
+                                    <input type="checkbox" id="checkAll" onchange="toggleCheckAll(this)">
+                                </th>
+
+                                <th class="project-col sortable-header" id="thProject" onclick="toggleSort('project')">
+                                    <span data-i18n="project">Project</span>
+                                    <span class="sort-indicator" id="sortProjectIndicator">&lt;-&gt;</span>
+                                </th>
+
+                                <th class="col-status sortable-header" id="thStatus" onclick="toggleSort('status')">
+                                    <span data-i18n="status">Tráº¡ng thĂ¡i</span>
+                                    <span class="sort-indicator" id="sortStatusIndicator">&lt;-&gt;</span>
+                                </th>
+
+                                <th class="col-progress" data-i18n="train_percent">% Train</th>
+                                <th class="col-time" data-i18n="start_time">Báº¯t Ä‘áº§u</th>
+                                <th class="col-time" data-i18n="end_time">Káº¿t thĂºc</th>
+                                <th class="col-rc">RC</th>
+                                <th class="col-action" data-i18n="action">HĂ nh Ä‘á»™ng</th>
+                            </tr>
+                        </thead>
+                        <tbody id="projectTableBody">
+                            <tr><td colspan="9" data-i18n="loading">Äang táº£i dá»¯ liá»‡u...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div class="card section-space">
+                <div class="card-title">
+                    <h3 data-i18n="train_progress_panel">Tiáº¿n trĂ¬nh tá»« Train_model_AI.py</h3>
+                    <div class="small" data-i18n="train_progress_desc">Äá»c tá»« /status vĂ  /history cá»§a port 8008</div>
+                </div>
+
+                <div class="progress-wrap">
+                    <div class="small" id="trainProgressText">epoch 0/0 | 0%</div>
+                    <div class="progress-bar">
+                        <div class="progress-fill" id="trainProgressFill"></div>
+                    </div>
+                </div>
+
+                <div class="monitor-grid section-space">
+                    <div class="metric"><div class="k" data-i18n="eta">ETA</div><div class="v" id="m_eta">-</div></div>
+                    <div class="metric"><div class="k" data-i18n="elapsed">Elapsed</div><div class="v" id="m_elapsed">-</div></div>
+                    <div class="metric"><div class="k">LR</div><div class="v" id="m_lr">-</div></div>
+                    <div class="metric"><div class="k" data-i18n="loss">Loss</div><div class="v" id="m_loss">-</div></div>
+
+                    <div class="metric"><div class="k" data-i18n="loss_parts">Loss box / cls / dfl</div><div class="v" id="m_lossx">-</div></div>
+                    <div class="metric"><div class="k" data-i18n="images_per_sec">Images / sec</div><div class="v" id="m_ips">-</div></div>
+                    <div class="metric"><div class="k" data-i18n="epoch_avg_time">Epoch / Avg time</div><div class="v" id="m_etime">-</div></div>
+                    <div class="metric"><div class="k" data-i18n="batch_imgsize">Batch / ImgSize</div><div class="v" id="m_bi">-</div></div>
+
+                    <div class="metric"><div class="k" data-i18n="precision">Precision</div><div class="v" id="m_prec">-</div></div>
+                    <div class="metric"><div class="k" data-i18n="recall">Recall</div><div class="v" id="m_rec">-</div></div>
+                    <div class="metric"><div class="k">mAP50</div><div class="v" id="m_m50">-</div></div>
+                    <div class="metric"><div class="k">mAP50-95</div><div class="v" id="m_m5095">-</div></div>
+
+                    <div class="metric"><div class="k" data-i18n="best_map">Best mAP50-95</div><div class="v" id="m_best">-</div></div>
+                    <div class="metric"><div class="k" data-i18n="device">Device</div><div class="v" id="m_dev">-</div></div>
+                    <div class="metric"><div class="k" data-i18n="gpu_memory">GPU Memory</div><div class="v" id="m_mem">-</div></div>
+                    <div class="metric"><div class="k" data-i18n="dataset_train_val">Dataset train / val</div><div class="v" id="m_ds">-</div></div>
+
+                    <div class="metric"><div class="k" data-i18n="optimizer">Optimizer</div><div class="v" id="m_opt">-</div></div>
+                    <div class="metric"><div class="k" data-i18n="start_time">Start time</div><div class="v" id="m_start">-</div></div>
+                    <div class="metric"><div class="k" data-i18n="run_dir">Run dir</div><div class="v" id="m_sdir">-</div></div>
+                    <div class="metric"><div class="k" data-i18n="weights">Weights</div><div class="v" id="m_wts">-</div></div>
+                </div>
+
+                <div class="section-space">
+                    <div class="small mb8" data-i18n="realtime_log">Log realtime tá»« Train_model_AI.py</div>
+                    <pre id="trainMonitorLog" class="monitor-log">ChÆ°a cĂ³ log tá»« port 8008</pre>
+                </div>
+            </div>
+        </div>
+
+        <div>
+            <div class="card mb18">
+                <div class="card-title">
+                    <h3 data-i18n="train_order">Thá»© tá»± train</h3>
+                    <div class="small" data-i18n="current_queue">Queue hiá»‡n táº¡i</div>
+                </div>
+                <div id="queueList" class="queue-list">
+                    <div class="muted-box" data-i18n="empty_queue">Queue trá»‘ng</div>
+                </div>
+            </div>
+
+            <div class="card mb18">
+                <div class="card-title">
+                    <h3 data-i18n="train_history">Lá»‹ch sá»­ train</h3>
+                    <div class="small" data-i18n="latest_50">50 báº£n ghi gáº§n nháº¥t</div>
+                </div>
+                <div id="historyList" class="history-list">
+                    <div class="muted-box" data-i18n="no_history">ChÆ°a cĂ³ lá»‹ch sá»­</div>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-title">
+                    <h3 data-i18n="subprocess_log">Log subprocess</h3>
+                    <div class="small" data-i18n="stdout_stderr_log">Log stdout/stderr cá»§a file train</div>
+                </div>
+
+                <div class="log-toolbar">
+                    <select id="logProject" onchange="loadLog()"></select>
+                </div>
+                <pre id="logBox">ChÆ°a cĂ³ log</pre>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script src="/UI/app.js"></script>
+</body>
+</html>
