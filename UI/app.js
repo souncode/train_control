@@ -17,9 +17,12 @@ let logRefreshInFlight = false;
 let latestStateData = null;
 let confusionViewState = new Map();
 let detailTabState = new Map();
+let runDetailExpandedState = new Map();
+let datasetDraftState = new Map();
 let pendingProjectDataUpload = '';
 let uploadProgressVisible = false;
 let sidePanelHidden = localStorage.getItem('train_monitor_side_panel_hidden') === '1';
+let queueRecoveryPromptShown = false;
 
 let sortState = {
     key: 'project',
@@ -158,6 +161,9 @@ const I18N = {
         download: 'Táº£i ZIP',
         duplicate_button: 'Nhan ban',
         clear_dataset_button: 'Clear dataset',
+        project_task_starting: 'Dang bat dau xu ly project...',
+        project_task_progress: 'Dang xu ly project...',
+        project_task_done: 'Xu ly project hoan thanh',
         dataset_config_title: 'Cau hinh dataset',
         train_ratio: 'Train %',
         valid_ratio: 'Validation %',
@@ -168,6 +174,9 @@ const I18N = {
         merge_train_valid: 'Train toan bo data',
         split_by_class: 'Chia theo class',
         train_all_data: 'Train toan bo data',
+        dataset_task_starting: 'Dang bat dau xu ly dataset...',
+        dataset_task_progress: 'Dang xu ly dataset...',
+        dataset_task_done: 'Xu ly dataset hoan thanh',
         dataset_ratio_hint: 'Tong Train + Validation + Test phai bang 100',
         shuffle_dataset: 'Shuffle',
         seed_value: 'Seed',
@@ -195,7 +204,30 @@ const I18N = {
         click_class_hint: 'Click a class below to filter confusion pairs',
         confused_with: 'Confused with',
         misclassified_samples: 'Misclassified samples',
+        label_source_image: 'Relabel -> Train',
+        source_image_missing: 'Khong tim thay anh goc trong image',
         revalidate_run: 'Re-validate',
+        revalidate_starting: 'Dang bat dau revalidate...',
+        revalidate_progress: 'Dang revalidate...',
+        revalidate_done: 'Revalidate hoan thanh',
+        detail_tab_testing: 'Model Testing',
+        model_testing: 'Model Testing',
+        run_model_testing: 'Run Testing',
+        model_testing_results: 'Testing results',
+        model_testing_exports: 'Export CSV',
+        testing_valid_images: 'Valid sample images',
+        testing_misclassified_images: 'Misclassified sample images',
+        testing_correct_objects: 'Correct objects',
+        testing_error_objects: 'Error objects',
+        testing_metric: 'Metric',
+        testing_value: 'Value',
+        correct_count: 'Correct',
+        wrong_class_count: 'Wrong class',
+        missed_bg_count: 'Missed as bg',
+        model_testing_starting: 'Dang bat dau model testing...',
+        model_testing_progress: 'Dang model testing...',
+        model_testing_done: 'Model testing hoan thanh',
+        no_model_testing: 'Chua co ket qua Model Testing',
         stop_button: 'Stop',
         stopped_count: 'Stopped',
         notify_on: 'ÄĂ£ báº­t thĂ´ng bĂ¡o Telegram',
@@ -221,6 +253,7 @@ const I18N = {
         select_image_first: 'Chá»n áº£nh Ä‘á»ƒ xem/sá»­a label',
         uploading: 'Äang upload...',
         uploading_data: 'Äang thêm data...',
+        server_processing: 'Server dang xu ly file vua upload...',
         detail_tab_dataset: 'Dataset',
         detail_tab_output: 'Output',
         detail_tab_metrics: 'Metrics',
@@ -228,6 +261,12 @@ const I18N = {
         labels_panel_desc: 'Mo Label Editor hoac them data zip cho project nay.',
         open_label_editor: 'Mo Label Editor',
         add_data_zip_button: 'Them data zip',
+        continue_last_session_title: 'Phuc hoi session truoc',
+        continue_last_session_message: 'Phat hien queue session truoc$PROJECTS$.\n\nBan muon tiep tuc hay bo qua?',
+        continue_last_session_confirm: 'Continue last session',
+        continue_last_session_ignore: 'Ignore',
+        continue_last_session_done: 'Da tiep tuc session truoc',
+        continue_last_session_ignored: 'Da bo qua session truoc',
     },
     en: {
         app_title: 'AI Train Monitor',
@@ -352,6 +391,9 @@ const I18N = {
         download: 'Download ZIP',
         duplicate_button: 'Duplicate',
         clear_dataset_button: 'Clear dataset',
+        project_task_starting: 'Starting project task...',
+        project_task_progress: 'Processing project...',
+        project_task_done: 'Project task completed',
         dataset_config_title: 'Dataset config',
         train_ratio: 'Train %',
         valid_ratio: 'Validation %',
@@ -362,6 +404,9 @@ const I18N = {
         merge_train_valid: 'Train all data',
         split_by_class: 'Split by class',
         train_all_data: 'Train all data',
+        dataset_task_starting: 'Starting dataset task...',
+        dataset_task_progress: 'Processing dataset...',
+        dataset_task_done: 'Dataset task completed',
         dataset_ratio_hint: 'Train + Validation + Test must equal 100',
         shuffle_dataset: 'Shuffle',
         seed_value: 'Seed',
@@ -389,7 +434,30 @@ const I18N = {
         click_class_hint: 'Click a class below to filter confusion pairs',
         confused_with: 'Confused with',
         misclassified_samples: 'Misclassified samples',
+        label_source_image: 'Relabel -> Train',
+        source_image_missing: 'Source image not found in image folder',
         revalidate_run: 'Re-validate',
+        revalidate_starting: 'Starting re-validation...',
+        revalidate_progress: 'Re-validating...',
+        revalidate_done: 'Re-validation completed',
+        detail_tab_testing: 'Model Testing',
+        model_testing: 'Model Testing',
+        run_model_testing: 'Run Testing',
+        model_testing_results: 'Testing results',
+        model_testing_exports: 'Export CSV',
+        testing_valid_images: 'Valid sample images',
+        testing_misclassified_images: 'Misclassified sample images',
+        testing_correct_objects: 'Correct objects',
+        testing_error_objects: 'Error objects',
+        testing_metric: 'Metric',
+        testing_value: 'Value',
+        correct_count: 'Correct',
+        wrong_class_count: 'Wrong class',
+        missed_bg_count: 'Missed as bg',
+        model_testing_starting: 'Starting model testing...',
+        model_testing_progress: 'Running model testing...',
+        model_testing_done: 'Model testing completed',
+        no_model_testing: 'No Model Testing results yet',
         stop_button: 'Stop',
         stopped_count: 'Stopped',
         notify_on: 'Telegram notification enabled',
@@ -415,6 +483,7 @@ const I18N = {
         select_image_first: 'Select an image to view/edit label',
         uploading: 'Uploading...',
         uploading_data: 'Uploading data...',
+        server_processing: 'Server is processing the uploaded file...',
         detail_tab_dataset: 'Dataset',
         detail_tab_output: 'Output',
         detail_tab_metrics: 'Metrics',
@@ -422,6 +491,12 @@ const I18N = {
         labels_panel_desc: 'Open Label Editor or import a data zip for this project.',
         open_label_editor: 'Open Label Editor',
         add_data_zip_button: 'Add data zip',
+        continue_last_session_title: 'Restore previous session',
+        continue_last_session_message: 'A previous queue session was found$PROJECTS$.\n\nDo you want to continue it or ignore it?',
+        continue_last_session_confirm: 'Continue last session',
+        continue_last_session_ignore: 'Ignore',
+        continue_last_session_done: 'Previous session continued',
+        continue_last_session_ignored: 'Previous session ignored',
     }
 };
 
@@ -760,6 +835,32 @@ function escapeAttr(text) {
     return escapeHtml(text).replaceAll('`', '&#096;');
 }
 
+let modalSearchLockState = null;
+
+function lockSearchInputForModal() {
+    const searchEl = document.getElementById('searchInput');
+    if (!searchEl) return;
+    modalSearchLockState = {
+        value: String(searchEl.value || ''),
+        readOnly: !!searchEl.readOnly,
+        disabled: !!searchEl.disabled,
+    };
+    searchEl.blur();
+    searchEl.readOnly = true;
+    searchEl.disabled = true;
+}
+
+function unlockSearchInputForModal() {
+    const searchEl = document.getElementById('searchInput');
+    if (!searchEl || !modalSearchLockState) return;
+    searchEl.disabled = !!modalSearchLockState.disabled;
+    searchEl.readOnly = !!modalSearchLockState.readOnly;
+    if (String(searchEl.value || '') !== String(modalSearchLockState.value || '')) {
+        searchEl.value = modalSearchLockState.value;
+    }
+    modalSearchLockState = null;
+}
+
 function showModalDialog({
     title = '',
     message = '',
@@ -769,6 +870,12 @@ function showModalDialog({
     input = null
 } = {}) {
     const host = ensureModalHost();
+    const inputType = escapeAttr(input?.type || 'text');
+    const inputValue = escapeAttr(input?.value || '');
+    const inputPlaceholder = escapeAttr(input?.placeholder || '');
+    const inputAutocomplete = escapeAttr(input?.autocomplete || 'off');
+    const modalInputName = `webModalInput_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    lockSearchInputForModal();
 
     return new Promise((resolve) => {
         host.innerHTML = `
@@ -783,10 +890,16 @@ function showModalDialog({
                             <input
                                 id="webModalInput"
                                 class="web-modal-input"
-                                type="${escapeAttr(input.type || 'text')}"
-                                value="${escapeAttr(input.value || '')}"
-                                placeholder="${escapeAttr(input.placeholder || '')}"
-                                ${input.autocomplete ? `autocomplete="${escapeAttr(input.autocomplete)}"` : ''}
+                                name="${modalInputName}"
+                                type="${inputType}"
+                                value="${inputValue}"
+                                placeholder="${inputPlaceholder}"
+                                autocomplete="${inputAutocomplete}"
+                                autocapitalize="off"
+                                autocorrect="off"
+                                spellcheck="false"
+                                data-lpignore="true"
+                                data-1p-ignore="true"
                             >
                         ` : ''}
                     </div>
@@ -816,6 +929,7 @@ function showModalDialog({
         const close = (result) => {
             document.removeEventListener('keydown', onKeyDown, true);
             host.innerHTML = '';
+            unlockSearchInputForModal();
             resolve(result);
         };
 
@@ -1053,6 +1167,22 @@ function filterProjects(projects) {
     });
 }
 
+function shouldUseLightweightProjectRefresh(nextStateData) {
+    if (expandedProjects.size === 0) return false;
+    if (searchQuery || statusFilter !== 'all') return false;
+
+    const prevProjects = Array.isArray(latestStateData?.projects) ? latestStateData.projects : [];
+    const nextProjects = Array.isArray(nextStateData?.projects) ? nextStateData.projects : [];
+    if (prevProjects.length !== nextProjects.length) return false;
+
+    for (let i = 0; i < prevProjects.length; i += 1) {
+        if (String(prevProjects[i]?.name || '') !== String(nextProjects[i]?.name || '')) {
+            return false;
+        }
+    }
+    return true;
+}
+
 function updateSummaryBadges(projects) {
     const counts = {
         all: 0,
@@ -1162,6 +1292,31 @@ function setProjectDetailTab(encodedName, tabKey = 'dataset') {
     refreshData(latestStateData || undefined);
 }
 
+function getDatasetDraft(projectName, fallback = {}) {
+    const key = String(projectName || '');
+    if (!datasetDraftState.has(key)) {
+        datasetDraftState.set(key, { ...(fallback || {}) });
+    }
+    return datasetDraftState.get(key);
+}
+
+function updateDatasetDraft(projectName, field, value) {
+    const draft = getDatasetDraft(projectName, {});
+    draft[String(field || '')] = value;
+}
+
+function isRunDetailExpanded(runKey) {
+    return runDetailExpandedState.get(String(runKey || '')) === true;
+}
+
+function toggleRunDetail(encodedProjectName, encodedRunFolder) {
+    const projectName = decodeURIComponent(String(encodedProjectName || ''));
+    const runFolder = decodeURIComponent(String(encodedRunFolder || ''));
+    const runKey = `${projectName}::${runFolder}`;
+    runDetailExpandedState.set(runKey, !isRunDetailExpanded(runKey));
+    refreshData(latestStateData || undefined);
+}
+
 function setRunConfusionClassFilter(projectName, runKey, className = '') {
     const state = getRunConfusionViewState(runKey);
     state.className = decodeURIComponent(String(className || ''));
@@ -1198,6 +1353,7 @@ function renderProjectDetailContent(projectName) {
     }
 
     const datasetConfig = data.dataset_config || {};
+    const datasetDraft = getDatasetDraft(projectName, datasetConfig);
     const activeTab = getProjectDetailTab(projectName);
 
     const weightsHtml = (data.weight_files && data.weight_files.length > 0)
@@ -1250,6 +1406,7 @@ function renderProjectDetailContent(projectName) {
             const classOverview = Array.isArray(confusion.class_overview) ? confusion.class_overview : [];
             const lowSampleClasses = Array.isArray(confusion.low_sample_classes) ? confusion.low_sample_classes : [];
             const runKey = `${projectName}::${run.run_folder}`;
+            const runExpanded = isRunDetailExpanded(runKey);
             const confusionState = getRunConfusionViewState(runKey);
             const selectedClassName = String(confusionState.className || '');
             const selectedPredClassName = String(confusionState.predClassName || '');
@@ -1391,6 +1548,9 @@ function renderProjectDetailContent(projectName) {
                                     <tr>
                                         <th>Class</th>
                                         <th>${t('error_rate')}</th>
+                                        <th>${t('correct_count')}</th>
+                                        <th>${t('wrong_class_count')}</th>
+                                        <th>${t('missed_bg_count')}</th>
                                         <th>Errors</th>
                                         <th>Total</th>
                                     </tr>
@@ -1405,6 +1565,9 @@ function renderProjectDetailContent(projectName) {
                                                 >${escapeHtml(row.gt_class_name ?? '-')}</button>
                                             </td>
                                             <td>${escapeHtml(((Number(row.error_rate || 0)) * 100).toFixed(2))}%</td>
+                                            <td>${escapeHtml(row.correct ?? 0)}</td>
+                                            <td>${escapeHtml(row.mis_as_other_classes ?? 0)}</td>
+                                            <td>${escapeHtml(row.missed_as_background ?? 0)}</td>
                                             <td>${escapeHtml(row.total_errors ?? 0)}</td>
                                             <td>${escapeHtml(row.gt_total ?? 0)}</td>
                                         </tr>
@@ -1456,15 +1619,33 @@ function renderProjectDetailContent(projectName) {
                             ${visibleSamples.length > 0 ? `
                                 <div class="run-image-grid">
                                     ${visibleSamples.map(item => `
-                                        <a class="run-image-card" href="/api/output_file?project=${encodeURIComponent(projectName)}&rel=${encodeURIComponent(item.relative_path)}" target="_blank">
-                                            <img src="/api/output_file?project=${encodeURIComponent(projectName)}&rel=${encodeURIComponent(item.relative_path)}" alt="${escapeHtml(item.image_name)}">
-                                            <div class="run-image-name">${escapeHtml(item.gt_class_name || '-')} -> ${escapeHtml(item.pred_class_name || '-')} | ${escapeHtml(item.image_name || '-')}</div>
-                                        </a>
+                                        <div class="run-image-card">
+                                            <a class="run-image-preview-link" href="/api/output_file?project=${encodeURIComponent(projectName)}&rel=${encodeURIComponent(item.relative_path)}" target="_blank">
+                                                <img src="/api/output_file?project=${encodeURIComponent(projectName)}&rel=${encodeURIComponent(item.relative_path)}" alt="${escapeHtml(item.image_name)}">
+                                            </a>
+                                            <div class="run-image-name">
+                                                <div>${escapeHtml(item.gt_class_name || '-')} -> ${escapeHtml(item.pred_class_name || '-')}</div>
+                                                <div>${escapeHtml(item.image_name || '-')}</div>
+                                                ${item.source_image_rel ? `<div class="small">image/${escapeHtml(item.source_image_rel)}</div>` : `<div class="small">${t('source_image_missing')}</div>`}
+                                            </div>
+                                            <div class="run-image-actions">
+                                                ${item.source_image_rel ? `
+                                                    <button
+                                                        type="button"
+                                                        class="btn-primary btn-mini"
+                                                        onclick="openProjectEditorAtImage('${encodeURIComponent(projectName)}', '${encodeURIComponent(item.source_image_rel)}', '${encodeURIComponent(item.val_image_rel_path || item.source_image_rel || '')}')"
+                                                    >${t('label_source_image')}</button>
+                                                ` : ''}
+                                            </div>
+                                        </div>
                                     `).join('')}
                                 </div>
                             ` : `<div class="muted-box">No sample images match the current class/pair filter.</div>`}
                         </div>
                     ` : ''}
+                    <div class="detail-actions mb8">
+                        <button class="btn-light btn-mini" onclick="revalidateRun('${encodeURIComponent(projectName)}', '${encodeURIComponent(run.run_folder)}')">${t('revalidate_run')}</button>
+                    </div>
                     <div class="output-list">
                         <div class="small mb8">${t('results_rows')}: ${escapeHtml(csvInfo.row_count ?? 0)}</div>
                         <table class="output-table">
@@ -1488,11 +1669,10 @@ function renderProjectDetailContent(projectName) {
                 : `<div class="muted-box">${t('no_results_csv')}</div>`;
 
             return `
-                <details class="run-detail-card">
-                    <summary>
+                <details class="run-detail-card" ${runExpanded ? 'open' : ''}>
+                    <summary onclick="event.preventDefault(); toggleRunDetail('${encodeURIComponent(projectName)}', '${encodeURIComponent(run.run_folder)}')">
                         <span>${escapeHtml(run.run_folder)}</span>
                         <span class="small">Images: ${escapeHtml(run.image_count ?? 0)} | CSV: ${csvInfo.exists ? escapeHtml(csvInfo.row_count ?? 0) : 0}</span>
-                        <button class="btn-light btn-mini" onclick="event.preventDefault(); event.stopPropagation(); revalidateRun('${encodeURIComponent(projectName)}', '${encodeURIComponent(run.run_folder)}')">${t('revalidate_run')}</button>
                     </summary>
                     <div class="run-detail-body">
                         <div class="detail-box detail-box-full">
@@ -1516,31 +1696,31 @@ function renderProjectDetailContent(projectName) {
                 <div class="detail-stats">
                     <div class="detail-stat-item">
                         <div class="detail-stat-label">${t('train_ratio')}</div>
-                        <div class="detail-stat-value"><input type="number" min="0" max="100" id="dsTrain_${projectDomId(projectName)}" value="${escapeHtml(datasetConfig.train_percent ?? 80)}"></div>
+                        <div class="detail-stat-value"><input type="number" min="0" max="100" id="dsTrain_${projectDomId(projectName)}" value="${escapeHtml(datasetDraft.train_percent ?? 80)}" oninput="updateDatasetDraft('${encodeURIComponent(projectName)}', 'train_percent', Number(this.value || 0))"></div>
                     </div>
                     <div class="detail-stat-item">
                         <div class="detail-stat-label">${t('valid_ratio')}</div>
-                        <div class="detail-stat-value"><input type="number" min="0" max="100" id="dsValid_${projectDomId(projectName)}" value="${escapeHtml(datasetConfig.valid_percent ?? 20)}"></div>
+                        <div class="detail-stat-value"><input type="number" min="0" max="100" id="dsValid_${projectDomId(projectName)}" value="${escapeHtml(datasetDraft.valid_percent ?? 20)}" oninput="updateDatasetDraft('${encodeURIComponent(projectName)}', 'valid_percent', Number(this.value || 0))"></div>
                     </div>
                     <div class="detail-stat-item">
                         <div class="detail-stat-label">${t('test_ratio')}</div>
-                        <div class="detail-stat-value"><input type="number" min="0" max="100" id="dsTest_${projectDomId(projectName)}" value="${escapeHtml(datasetConfig.test_percent ?? 0)}"></div>
+                        <div class="detail-stat-value"><input type="number" min="0" max="100" id="dsTest_${projectDomId(projectName)}" value="${escapeHtml(datasetDraft.test_percent ?? 0)}" oninput="updateDatasetDraft('${encodeURIComponent(projectName)}', 'test_percent', Number(this.value || 0))"></div>
                     </div>
                     <div class="detail-stat-item">
                         <div class="detail-stat-label">${t('shuffle_dataset')}</div>
-                        <div class="detail-stat-value"><input type="checkbox" id="dsShuffle_${projectDomId(projectName)}" ${(datasetConfig.shuffle ?? true) ? 'checked' : ''}></div>
+                        <div class="detail-stat-value"><input type="checkbox" id="dsShuffle_${projectDomId(projectName)}" ${(datasetDraft.shuffle ?? true) ? 'checked' : ''} onchange="updateDatasetDraft('${encodeURIComponent(projectName)}', 'shuffle', this.checked)"></div>
                     </div>
                     <div class="detail-stat-item">
                         <div class="detail-stat-label">${t('seed_value')}</div>
-                        <div class="detail-stat-value"><input type="number" id="dsSeed_${projectDomId(projectName)}" value="${escapeHtml(datasetConfig.seed ?? 42)}"></div>
+                        <div class="detail-stat-value"><input type="number" id="dsSeed_${projectDomId(projectName)}" value="${escapeHtml(datasetDraft.seed ?? 42)}" oninput="updateDatasetDraft('${encodeURIComponent(projectName)}', 'seed', Number(this.value || 42))"></div>
                     </div>
                     <div class="detail-stat-item">
                         <div class="detail-stat-label">${t('split_by_class')}</div>
-                        <div class="detail-stat-value"><input type="checkbox" id="dsSplitClass_${projectDomId(projectName)}" ${(datasetConfig.split_by_class ?? false) ? 'checked' : ''}></div>
+                        <div class="detail-stat-value"><input type="checkbox" id="dsSplitClass_${projectDomId(projectName)}" ${(datasetDraft.split_by_class ?? false) ? 'checked' : ''} onchange="updateDatasetDraft('${encodeURIComponent(projectName)}', 'split_by_class', this.checked)"></div>
                     </div>
                     <div class="detail-stat-item">
                         <div class="detail-stat-label">${t('train_all_data')}</div>
-                        <div class="detail-stat-value"><input type="checkbox" id="dsTrainAll_${projectDomId(projectName)}" ${(datasetConfig.train_all_data ?? false) ? 'checked' : ''}></div>
+                        <div class="detail-stat-value"><input type="checkbox" id="dsTrainAll_${projectDomId(projectName)}" ${(datasetDraft.train_all_data ?? false) ? 'checked' : ''} onchange="updateDatasetDraft('${encodeURIComponent(projectName)}', 'train_all_data', this.checked)"></div>
                     </div>
                 </div>
                 <div class="small mb8">${t('dataset_ratio_hint')}</div>
@@ -1603,6 +1783,223 @@ function renderProjectDetailContent(projectName) {
         </div>
     `;
 
+    const testingTabHtml = (data.run_details && data.run_details.length > 0)
+        ? data.run_details.map(run => {
+            const testing = run.model_testing || {};
+            const testingCsv = testing.results_csv || {};
+            const testingSummary = testingCsv.summary || {};
+            const testingConfusion = testing.confusion_analysis || {};
+            const topErrorClasses = Array.isArray(testingConfusion.top_error_classes) ? testingConfusion.top_error_classes : [];
+            const topConfusions = Array.isArray(testingConfusion.top_confusions) ? testingConfusion.top_confusions : [];
+            const sampleItems = Array.isArray(testingConfusion.sample_items) ? testingConfusion.sample_items : [];
+            const exportFiles = Array.isArray(testing.export_files) ? testing.export_files : [];
+            const summaryCounts = testing.summary_counts || {};
+
+            return `
+                <div class="detail-box detail-box-full">
+                    <div class="detail-title">${t('model_testing')} | ${escapeHtml(run.run_folder)}</div>
+                    <div class="detail-actions mb8">
+                        <button class="btn-primary btn-mini" onclick="runModelTesting('${encodeURIComponent(projectName)}', '${encodeURIComponent(run.run_folder)}')">${t('run_model_testing')}</button>
+                        <button class="btn-success btn-mini" onclick="showMsaSampleUpload('${encodeURIComponent(projectName)}', '${encodeURIComponent(run.run_folder)}')">MSA Sample Test</button>
+                    </div>
+                    ${testing.exists ? `
+                        <div class="detail-stats mb8">
+                            <div class="detail-stat-item">
+                                <div class="detail-stat-label">${t('testing_valid_images')}</div>
+                                <div class="detail-stat-value">${escapeHtml(summaryCounts.valid_sample_images ?? 0)}</div>
+                            </div>
+                            <div class="detail-stat-item">
+                                <div class="detail-stat-label">${t('testing_misclassified_images')}</div>
+                                <div class="detail-stat-value">${escapeHtml(summaryCounts.misclassified_sample_images ?? 0)}</div>
+                            </div>
+                            <div class="detail-stat-item">
+                                <div class="detail-stat-label">${t('testing_correct_objects')}</div>
+                                <div class="detail-stat-value">${escapeHtml(summaryCounts.total_correct_objects ?? 0)}</div>
+                            </div>
+                            <div class="detail-stat-item">
+                                <div class="detail-stat-label">${t('testing_error_objects')}</div>
+                                <div class="detail-stat-value">${escapeHtml(summaryCounts.total_error_objects ?? 0)}</div>
+                            </div>
+                            <div class="detail-stat-item">
+                                <div class="detail-stat-label">mAP50-95</div>
+                                <div class="detail-stat-value">${escapeHtml(testingSummary.map5095 ?? '-')}</div>
+                            </div>
+                            <div class="detail-stat-item">
+                                <div class="detail-stat-label">Precision / Recall</div>
+                                <div class="detail-stat-value">${escapeHtml(testingSummary.precision ?? '-')} | ${escapeHtml(testingSummary.recall ?? '-')}</div>
+                            </div>
+                        </div>
+                        <div class="output-list mb8">
+                            <div class="detail-title">${t('model_testing_results')}</div>
+                            <table class="output-table">
+                                <thead>
+                                    <tr>
+                                        <th>${t('testing_metric')}</th>
+                                        <th>${t('testing_value')}</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <tr>
+                                        <td>${t('testing_valid_images')}</td>
+                                        <td>${escapeHtml(summaryCounts.valid_sample_images ?? 0)}</td>
+                                    </tr>
+                                    <tr>
+                                        <td>${t('testing_misclassified_images')}</td>
+                                        <td>${escapeHtml(summaryCounts.misclassified_sample_images ?? 0)}</td>
+                                    </tr>
+                                    <tr>
+                                        <td>${t('testing_correct_objects')}</td>
+                                        <td>${escapeHtml(summaryCounts.total_correct_objects ?? 0)}</td>
+                                    </tr>
+                                    <tr>
+                                        <td>${t('testing_error_objects')}</td>
+                                        <td>${escapeHtml(summaryCounts.total_error_objects ?? 0)}</td>
+                                    </tr>
+                                    <tr>
+                                        <td>mAP50-95</td>
+                                        <td>${escapeHtml(testingSummary.map5095 ?? '-')}</td>
+                                    </tr>
+                                    <tr>
+                                        <td>Precision</td>
+                                        <td>${escapeHtml(testingSummary.precision ?? '-')}</td>
+                                    </tr>
+                                    <tr>
+                                        <td>Recall</td>
+                                        <td>${escapeHtml(testingSummary.recall ?? '-')}</td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                        ${exportFiles.length > 0 ? `
+                            <div class="detail-title">${t('model_testing_exports')}</div>
+                            <div class="detail-actions mb8">
+                                ${exportFiles.map(file => `
+                                    <a
+                                        class="download-link"
+                                        href="/api/output_file?project=${encodeURIComponent(projectName)}&rel=${encodeURIComponent(file.relative_path)}"
+                                        download
+                                    >${escapeHtml(file.name)}</a>
+                                `).join('')}
+                            </div>
+                        ` : ''}
+                        ${topErrorClasses.length > 0 ? `
+                            <div class="output-list mb8">
+                                <div class="detail-title">${t('error_by_class')}</div>
+                                <table class="output-table">
+                                <thead>
+                                    <tr>
+                                        <th>Class</th>
+                                        <th>${t('error_rate')}</th>
+                                        <th>${t('correct_count')}</th>
+                                        <th>${t('wrong_class_count')}</th>
+                                        <th>${t('missed_bg_count')}</th>
+                                        <th>Errors</th>
+                                        <th>Total</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                        ${topErrorClasses.map(row => `
+                                            <tr>
+                                                <td>${escapeHtml(row.gt_class_name ?? '-')}</td>
+                                                <td>${escapeHtml(((Number(row.error_rate || 0)) * 100).toFixed(2))}%</td>
+                                                <td>${escapeHtml(row.correct ?? 0)}</td>
+                                                <td>${escapeHtml(row.mis_as_other_classes ?? 0)}</td>
+                                                <td>${escapeHtml(row.missed_as_background ?? 0)}</td>
+                                                <td>${escapeHtml(row.total_errors ?? 0)}</td>
+                                                <td>${escapeHtml(row.gt_total ?? 0)}</td>
+                                            </tr>
+                                        `).join('')}
+                                    </tbody>
+                                </table>
+                            </div>
+                        ` : ''}
+                        ${topConfusions.length > 0 ? `
+                            <div class="output-list mb8">
+                                <div class="detail-title">${t('confusion_pairs')}</div>
+                                <table class="output-table">
+                                    <thead>
+                                        <tr>
+                                            <th>GT class</th>
+                                            <th>${t('confused_with')}</th>
+                                            <th>${t('error_rate')}</th>
+                                            <th>Count</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        ${topConfusions.map(row => `
+                                            <tr>
+                                                <td>${escapeHtml(row.gt_class_name ?? '-')}</td>
+                                                <td>${escapeHtml(row.pred_class_name ?? '-')}</td>
+                                                <td>${escapeHtml(((Number(row.rate_over_gt || 0)) * 100).toFixed(2))}%</td>
+                                                <td>${escapeHtml(row.count ?? 0)}</td>
+                                            </tr>
+                                        `).join('')}
+                                    </tbody>
+                                </table>
+                            </div>
+                        ` : ''}
+                        ${sampleItems.length > 0 ? `
+                            <div class="detail-box detail-box-full mb8">
+                                <div class="detail-title">${t('misclassified_samples')}</div>
+                                <div class="run-image-grid">
+                                    ${sampleItems.map(item => `
+                                        <div class="run-image-card">
+                                            <a class="run-image-preview-link" href="/api/output_file?project=${encodeURIComponent(projectName)}&rel=${encodeURIComponent(item.relative_path)}" target="_blank">
+                                                <img src="/api/output_file?project=${encodeURIComponent(projectName)}&rel=${encodeURIComponent(item.relative_path)}" alt="${escapeHtml(item.image_name)}">
+                                            </a>
+                                            <div class="run-image-name">
+                                                <div>${escapeHtml(item.gt_class_name || '-')} -> ${escapeHtml(item.pred_class_name || '-')}</div>
+                                                <div>${escapeHtml(item.image_name || '-')}</div>
+                                            </div>
+                                        </div>
+                                    `).join('')}
+                                </div>
+                            </div>
+                        ` : ''}
+                        ${run.msa_testing && run.msa_testing.exists ? `
+                            <div class="detail-box detail-box-full mb8" style="border: 2px solid #4CAF50;">
+                                <div class="detail-title">📊 MSA Sample Results</div>
+                                <div class="detail-stats mb8">
+                                    <div class="detail-stat-item">
+                                        <div class="detail-stat-label">Total Samples</div>
+                                        <div class="detail-stat-value">${run.msa_testing.results?.total_images || 0}</div>
+                                    </div>
+                                    <div class="detail-stat-item">
+                                        <div class="detail-stat-label">Incorrect</div>
+                                        <div class="detail-stat-value">${run.msa_testing.results?.wrong_images || 0}</div>
+                                    </div>
+                                    <div class="detail-stat-item">
+                                        <div class="detail-stat-label">Error Rate</div>
+                                        <div class="detail-stat-value" style="color: ${Number(run.msa_testing.results?.error_rate || 0) > 20 ? '#f44336' : '#4CAF50'};">${Number(run.msa_testing.results?.error_rate || 0).toFixed(2)}%</div>
+                                    </div>
+                                </div>
+                                <div class="run-image-grid">
+                                    ${(run.msa_testing.results?.sample_items || []).map(item => `
+                                        <div class="run-image-card">
+                                            <div style="display:flex; gap:4px; height:200px;">
+                                                <div style="flex:1; overflow:hidden; border-right:2px solid #ccc;">
+                                                    <img src="/api/output_file?project=${encodeURIComponent(projectName)}&rel=${encodeURIComponent(item.gt_vis_relative_path)}" alt="GT" style="width:100%; height:100%; object-fit:cover;">
+                                                    <div style="background:#e8f5e9; padding:4px; text-align:center; font-size:11px;">GT</div>
+                                                </div>
+                                                <div style="flex:1; overflow:hidden;">
+                                                    <img src="/api/output_file?project=${encodeURIComponent(projectName)}&rel=${encodeURIComponent(item.pred_vis_relative_path)}" alt="Pred" style="width:100%; height:100%; object-fit:cover;">
+                                                    <div style="background:#fff3e0; padding:4px; text-align:center; font-size:11px;">Pred</div>
+                                                </div>
+                                            </div>
+                                            <div class="run-image-name">
+                                                <div style="font-size:11px;">${item.status === 'wrong' ? '❌' : '✓'} ${escapeHtml(item.image_name)}</div>
+                                            </div>
+                                        </div>
+                                    `).join('')}
+                                </div>
+                            </div>
+                        ` : ''}
+                    ` : `<div class="muted-box">${t('no_model_testing')}</div>`}
+                </div>
+            `;
+        }).join('')
+        : `<div class="muted-box">${t('no_model_testing')}</div>`;
+
     const labelsTabHtml = `
         <div class="detail-box detail-box-full">
             <div class="detail-title">${t('label_editor')}</div>
@@ -1620,27 +2017,30 @@ function renderProjectDetailContent(projectName) {
                 <button class="detail-tab-btn ${activeTab === 'dataset' ? 'active' : ''}" onclick="setProjectDetailTab('${encodeURIComponent(projectName)}', 'dataset')">${t('detail_tab_dataset')}</button>
                 <button class="detail-tab-btn ${activeTab === 'output' ? 'active' : ''}" onclick="setProjectDetailTab('${encodeURIComponent(projectName)}', 'output')">${t('detail_tab_output')}</button>
                 <button class="detail-tab-btn ${activeTab === 'metrics' ? 'active' : ''}" onclick="setProjectDetailTab('${encodeURIComponent(projectName)}', 'metrics')">${t('detail_tab_metrics')}</button>
+                <button class="detail-tab-btn ${activeTab === 'testing' ? 'active' : ''}" onclick="setProjectDetailTab('${encodeURIComponent(projectName)}', 'testing')">${t('detail_tab_testing')}</button>
                 <button class="detail-tab-btn ${activeTab === 'labels' ? 'active' : ''}" onclick="setProjectDetailTab('${encodeURIComponent(projectName)}', 'labels')">${t('detail_tab_labels')}</button>
             </div>
             <div class="detail-tab-panel ${activeTab === 'dataset' ? 'active' : ''}">${datasetTabHtml}</div>
             <div class="detail-tab-panel ${activeTab === 'output' ? 'active' : ''}">${outputTabHtml}</div>
             <div class="detail-tab-panel ${activeTab === 'metrics' ? 'active' : ''}">${metricsTabHtml}</div>
+            <div class="detail-tab-panel ${activeTab === 'testing' ? 'active' : ''}">${testingTabHtml}</div>
             <div class="detail-tab-panel ${activeTab === 'labels' ? 'active' : ''}">${labelsTabHtml}</div>
         </div>
     `;
 }
 
 function getDatasetConfigFromInputs(projectName) {
+    const draft = getDatasetDraft(projectName, {});
     const id = projectDomId(projectName);
     return {
         project: projectName,
-        train_percent: Number(document.getElementById(`dsTrain_${id}`)?.value || 0),
-        valid_percent: Number(document.getElementById(`dsValid_${id}`)?.value || 0),
-        test_percent: Number(document.getElementById(`dsTest_${id}`)?.value || 0),
-        shuffle: !!document.getElementById(`dsShuffle_${id}`)?.checked,
-        seed: Number(document.getElementById(`dsSeed_${id}`)?.value || 42),
-        split_by_class: !!document.getElementById(`dsSplitClass_${id}`)?.checked,
-        train_all_data: !!document.getElementById(`dsTrainAll_${id}`)?.checked,
+        train_percent: Number(document.getElementById(`dsTrain_${id}`)?.value ?? draft.train_percent ?? 0),
+        valid_percent: Number(document.getElementById(`dsValid_${id}`)?.value ?? draft.valid_percent ?? 0),
+        test_percent: Number(document.getElementById(`dsTest_${id}`)?.value ?? draft.test_percent ?? 0),
+        shuffle: !!(document.getElementById(`dsShuffle_${id}`)?.checked ?? draft.shuffle),
+        seed: Number(document.getElementById(`dsSeed_${id}`)?.value ?? draft.seed ?? 42),
+        split_by_class: !!(document.getElementById(`dsSplitClass_${id}`)?.checked ?? draft.split_by_class),
+        train_all_data: !!(document.getElementById(`dsTrainAll_${id}`)?.checked ?? draft.train_all_data),
     };
 }
 
@@ -1652,6 +2052,7 @@ async function saveDatasetConfig(encodedName) {
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify(payload)
     });
+    datasetDraftState.set(projectName, { ...(data.config || payload) });
     projectDetailCache.delete(projectName);
     alert(msg(data.message, 'OK'));
     await ensureProjectDetailLoaded(projectName);
@@ -1663,20 +2064,22 @@ async function createDataset(encodedName) {
     const payload = getDatasetConfigFromInputs(projectName);
     let data;
     if (payload.train_all_data) {
-        data = await apiGet('/api/project/merge_train_valid', {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({ project: projectName })
-        });
+        data = await runDatasetTask(
+            projectName,
+            '/api/project/merge_train_valid',
+            { project: projectName },
+            t('merge_train_valid')
+        );
     } else {
-        data = await apiGet('/api/project/create_dataset', {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({
+        data = await runDatasetTask(
+            projectName,
+            '/api/project/create_dataset',
+            {
                 ...payload,
                 split_mode: payload.split_by_class ? 'class' : 'count'
-            })
-        });
+            },
+            t('create_dataset')
+        );
     }
     projectDetailCache.delete(projectName);
     const counts = data.counts || {};
@@ -1704,6 +2107,10 @@ function renderProjectProgress(progressValue, statusValue) {
 }
 
 async function refreshData(prefetchedData = null, options = {}) {
+    const preserveScroll = options.preserveScroll !== false;
+    const lightweight = options.lightweight === true;
+    const prevScrollX = preserveScroll ? window.scrollX : 0;
+    const prevScrollY = preserveScroll ? window.scrollY : 0;
     const data = prefetchedData || await apiGet('/api/state');
     const logData = options.logData || null;
     latestStateData = data;
@@ -1716,17 +2123,94 @@ async function refreshData(prefetchedData = null, options = {}) {
     document.getElementById('projectCount').textContent = data.projects.length || 0;
     updateSummaryBadges(data.projects || []);
 
-    const body = document.getElementById('projectTableBody');
-    body.innerHTML = '';
+    const allSortedProjects = sortProjects(data.projects || []);
+    let renderedProjects = filterProjects(allSortedProjects);
+    document.getElementById('visibleCount').textContent = renderedProjects.length;
 
     const logProject = document.getElementById('logProject');
     const currentLogSelection = logProject.value;
+
+    const body = document.getElementById('projectTableBody');
+    const canLightweightRender = lightweight
+        && !!body
+        && (!!body.querySelector('.project-check'))
+        && shouldUseLightweightProjectRefresh(data);
+
+    if (canLightweightRender) {
+        allSortedProjects.forEach((p) => {
+            const row = document.querySelector(`input.project-check[value="${CSS.escape(p.name)}"]`)?.closest('tr');
+            if (!row) return;
+
+            const cells = row.children;
+            if (cells[3]) cells[3].innerHTML = badge(p.status);
+            if (cells[4]) cells[4].innerHTML = renderProjectProgress(p.progress, p.status);
+            if (cells[5]) cells[5].textContent = p.last_start || '-';
+            if (cells[6]) cells[6].textContent = p.last_end || '-';
+            if (cells[7]) cells[7].textContent = p.last_returncode === null ? '-' : p.last_returncode;
+            row.classList.toggle('running-row', p.status === 'running');
+        });
+
+        logProject.innerHTML = '';
+        allSortedProjects.forEach((p) => {
+            const opt = document.createElement('option');
+            opt.value = p.name;
+            opt.textContent = p.name;
+            logProject.appendChild(opt);
+        });
+
+        if (currentLogSelection && allSortedProjects.some(x => x.name === currentLogSelection)) {
+            logProject.value = currentLogSelection;
+        } else if (logData && logData.project && allSortedProjects.some(x => x.name === logData.project)) {
+            logProject.value = logData.project;
+        } else if (!logProject.value && allSortedProjects.length > 0) {
+            logProject.value = allSortedProjects[0].name;
+        }
+
+        const queueList = document.getElementById('queueList');
+        if (data.queue.length > 0) {
+            queueList.innerHTML = data.queue.map(item => `
+                <div class="queue-item">
+                    <div class="queue-head">
+                        <div class="queue-order">${item.order}</div>
+                        <div class="small">${t('queue_order')}</div>
+                    </div>
+                    <div><b>${escapeHtml(item.name)}</b></div>
+                </div>
+            `).join('');
+        } else {
+            queueList.innerHTML = `<div class="muted-box">${t('queue_empty')}</div>`;
+        }
+
+        const historyList = document.getElementById('historyList');
+        if (data.history.length > 0) {
+            historyList.innerHTML = data.history.slice().reverse().map(item => `
+                <div class="history-item">
+                    <div><b>${escapeHtml(item.project)}</b></div>
+                    <div class="small">${t('history_status')}: ${escapeHtml(item.status)} | ${t('history_time')}: ${escapeHtml(item.time)} | RC: ${item.returncode}</div>
+                </div>
+            `).join('');
+        } else {
+            historyList.innerHTML = `<div class="muted-box">${t('history_empty')}</div>`;
+        }
+
+        updateSelectedCount();
+        updateSortIndicators();
+        if (logData && logProject.value === String(logData.project || '')) {
+            applyProjectLog(logData, currentLogSelection !== logProject.value);
+        } else {
+            refreshLogThrottled(currentLogSelection !== logProject.value);
+        }
+
+        if (preserveScroll) {
+            window.requestAnimationFrame(() => {
+                window.scrollTo(prevScrollX, prevScrollY);
+            });
+        }
+        return;
+    }
+
+    body.innerHTML = '';
     logProject.innerHTML = '';
-
-    const allSortedProjects = sortProjects(data.projects || []);
-    let renderedProjects = filterProjects(allSortedProjects);
-
-    document.getElementById('visibleCount').textContent = renderedProjects.length;
 
     allSortedProjects.forEach((p) => {
         const opt = document.createElement('option');
@@ -1866,6 +2350,12 @@ async function refreshData(prefetchedData = null, options = {}) {
     } else {
         refreshLogThrottled(currentLogSelection !== logProject.value);
     }
+
+    if (preserveScroll) {
+        window.requestAnimationFrame(() => {
+            window.scrollTo(prevScrollX, prevScrollY);
+        });
+    }
 }
 
 function renderMonitorState(s) {
@@ -2001,7 +2491,8 @@ async function applySnapshot(snapshot = null) {
     const notifyData = data.notify || {};
     const logData = data.log || {};
 
-    await refreshData(stateData, { logData });
+    const hasExpandedDetails = expandedProjects.size > 0;
+    await refreshData(stateData, { logData, preserveScroll: true, lightweight: hasExpandedDetails });
     applyNotifyState(notifyData);
     await refreshTrainMonitor(monitorData);
 }
@@ -2075,17 +2566,28 @@ async function renameProjectPrompt(encodedName) {
     if (!String(newName).trim()) return;
     if (!await ensureLv2()) return;
 
-    const data = await apiGet('/api/project/rename', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({ project, new_name: String(newName).trim() })
-    });
+    try {
+        const trimmedNewName = String(newName).trim();
+        const data = await runProjectFsTask(
+            project,
+            '/api/project/rename',
+            { project, new_name: trimmedNewName },
+            t('rename_title'),
+            trimmedNewName
+        );
 
-    projectDetailCache.clear();
-    expandedProjects.delete(project);
-    selectedProjects.delete(project);
-    alert(msg(data.message, 'OK'));
-    refreshAll();
+        projectDetailCache.clear();
+        expandedProjects.delete(project);
+        selectedProjects.delete(project);
+        if (data.project && data.project !== project) {
+            expandedProjects.delete(data.project);
+            selectedProjects.delete(data.project);
+        }
+        alert(msg(data.message, 'OK'));
+        refreshAll();
+    } catch (e) {
+        alert(String(e.message || e));
+    }
 }
 
 async function duplicateProjectPrompt(encodedName) {
@@ -2104,14 +2606,21 @@ async function duplicateProjectPrompt(encodedName) {
     if (newName === null) return;
     if (!await ensureLv2()) return;
 
-    const data = await apiGet('/api/project/duplicate', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({ project, new_name: String(newName || '').trim() })
-    });
+    try {
+        const trimmedNewName = String(newName || '').trim();
+        const data = await runProjectFsTask(
+            project,
+            '/api/project/duplicate',
+            { project, new_name: trimmedNewName },
+            t('duplicate_title'),
+            trimmedNewName
+        );
 
-    alert(msg(data.message, 'OK'));
-    refreshAll();
+        alert(msg(data.message, 'OK'));
+        refreshAll();
+    } catch (e) {
+        alert(String(e.message || e));
+    }
 }
 
 async function clearDatasetPrompt(encodedName) {
@@ -2126,11 +2635,12 @@ async function clearDatasetPrompt(encodedName) {
     if (!confirmed) return;
     if (!await ensureLv2()) return;
 
-    const data = await apiGet('/api/project/clear_dataset', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({ project })
-    });
+    const data = await runDatasetTask(
+        project,
+        '/api/project/clear_dataset',
+        { project },
+        t('clear_dataset_button')
+    );
 
     projectDetailCache.delete(project);
     expandedProjects.delete(project);
@@ -2150,17 +2660,22 @@ async function deleteProjectPrompt(encodedName) {
     if (!confirmed) return;
     if (!await ensureLv2()) return;
 
-    const data = await apiGet('/api/project/delete', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({ project })
-    });
+    try {
+        const data = await runProjectFsTask(
+            project,
+            '/api/project/delete',
+            { project },
+            t('delete_project_title')
+        );
 
-    projectDetailCache.delete(project);
-    expandedProjects.delete(project);
-    selectedProjects.delete(project);
-    alert(msg(data.message, 'OK'));
-    refreshAll();
+        projectDetailCache.delete(project);
+        expandedProjects.delete(project);
+        selectedProjects.delete(project);
+        alert(msg(data.message, 'OK'));
+        refreshAll();
+    } catch (e) {
+        alert(String(e.message || e));
+    }
 }
 
 async function queueAll() {
@@ -2196,15 +2711,175 @@ async function stopCurrentTrain() {
 async function revalidateRun(encodedProject, encodedRunFolder) {
     const project = decodeURIComponent(encodedProject);
     const runFolder = decodeURIComponent(encodedRunFolder);
-    const data = await apiGet('/api/project/revalidate_run', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({ project, run_folder: runFolder })
-    });
-    projectDetailCache.delete(project);
-    alert(msg(data.message, 'OK'));
-    await ensureProjectDetailLoaded(project);
-    refreshData(latestStateData || undefined);
+    setUploadProgress(0, t('revalidate_starting'), `${project} | ${runFolder}`);
+    try {
+        const data = await apiGet('/api/project/revalidate_run', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ project, run_folder: runFolder })
+        });
+
+        const taskId = String(data.task_id || '');
+        let finalMessage = data.message || t('revalidate_done');
+        while (true) {
+            const status = await apiGet('/api/project/revalidate_run/status');
+            const pct = Math.max(0, Math.min(100, Number(status.progress) || 0));
+            const detail = msg(status.detail || `${project} | ${runFolder}`);
+            setUploadProgress(pct, t('revalidate_progress'), detail);
+
+            if (String(status.id || '') !== taskId) {
+                throw new Error('Re-validation task changed unexpectedly');
+            }
+            if (status.status === 'success') {
+                finalMessage = status.message || finalMessage;
+                setUploadProgress(100, t('revalidate_done'), detail);
+                await sleep(350);
+                break;
+            }
+            if (status.status === 'failed') {
+                throw new Error(msg(status.message, 'Re-validation failed'));
+            }
+            await sleep(1200);
+        }
+
+        projectDetailCache.delete(project);
+        await ensureProjectDetailLoaded(project);
+        refreshData(latestStateData || undefined);
+        hideUploadProgress();
+        alert(msg(finalMessage, 'OK'));
+    } catch (e) {
+        hideUploadProgress();
+        alert(msg(String(e), 'Re-validation failed'));
+    }
+}
+
+async function runDatasetTask(project, url, body, labelText = '') {
+    const fallbackDetail = labelText ? `${project} | ${labelText}` : project;
+    setUploadProgress(0, t('dataset_task_starting'), fallbackDetail);
+    try {
+        const data = await apiGet(url, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(body || {})
+        });
+
+        const taskId = String(data.task_id || '');
+        let finalMessage = data.message || t('dataset_task_done');
+        while (true) {
+            const status = await apiGet('/api/project/dataset_task/status');
+            const pct = Math.max(0, Math.min(100, Number(status.progress) || 0));
+            const detail = msg(status.detail || fallbackDetail);
+            setUploadProgress(pct, t('dataset_task_progress'), detail);
+
+            if (String(status.id || '') !== taskId) {
+                throw new Error('Dataset task changed unexpectedly');
+            }
+            if (status.status === 'success') {
+                finalMessage = status.message || finalMessage;
+                setUploadProgress(100, t('dataset_task_done'), detail);
+                await sleep(350);
+                hideUploadProgress();
+                return {
+                    ...(status.result || {}),
+                    message: finalMessage,
+                };
+            }
+            if (status.status === 'failed') {
+                throw new Error(msg(status.message, 'Dataset task failed'));
+            }
+            await sleep(800);
+        }
+    } catch (e) {
+        hideUploadProgress();
+        throw e;
+    }
+}
+
+async function runProjectFsTask(project, url, body, labelText = '', targetName = '') {
+    const fallbackDetail = [project, labelText, targetName].filter(Boolean).join(' | ');
+    setUploadProgress(0, t('project_task_starting'), fallbackDetail);
+    try {
+        const data = await apiGet(url, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(body || {})
+        });
+
+        const taskId = String(data.task_id || '');
+        let finalMessage = data.message || t('project_task_done');
+        while (true) {
+            const status = await apiGet('/api/project/fs_task/status');
+            const pct = Math.max(0, Math.min(100, Number(status.progress) || 0));
+            const detail = msg(status.detail || fallbackDetail);
+            setUploadProgress(pct, t('project_task_progress'), detail);
+
+            if (String(status.id || '') !== taskId) {
+                throw new Error('Project task changed unexpectedly');
+            }
+            if (status.status === 'success') {
+                finalMessage = status.message || finalMessage;
+                setUploadProgress(100, t('project_task_done'), detail);
+                await sleep(350);
+                hideUploadProgress();
+                return {
+                    ...(status.result || {}),
+                    message: finalMessage,
+                };
+            }
+            if (status.status === 'failed') {
+                throw new Error(msg(status.message, 'Project task failed'));
+            }
+            await sleep(800);
+        }
+    } catch (e) {
+        hideUploadProgress();
+        throw e;
+    }
+}
+
+async function runModelTesting(encodedProject, encodedRunFolder) {
+    const project = decodeURIComponent(encodedProject);
+    const runFolder = decodeURIComponent(encodedRunFolder);
+    setUploadProgress(0, t('model_testing_starting'), `${project} | ${runFolder}`);
+    try {
+        const data = await apiGet('/api/project/model_testing', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ project, run_folder: runFolder })
+        });
+
+        const taskId = String(data.task_id || '');
+        let finalMessage = data.message || t('model_testing_done');
+        while (true) {
+            const status = await apiGet('/api/project/model_testing/status');
+            const pct = Math.max(0, Math.min(100, Number(status.progress) || 0));
+            const detail = msg(status.detail || `${project} | ${runFolder}`);
+            setUploadProgress(pct, t('model_testing_progress'), detail);
+
+            if (String(status.id || '') !== taskId) {
+                throw new Error('Model testing task changed unexpectedly');
+            }
+            if (status.status === 'success') {
+                finalMessage = status.message || finalMessage;
+                setUploadProgress(100, t('model_testing_done'), detail);
+                await sleep(350);
+                break;
+            }
+            if (status.status === 'failed') {
+                throw new Error(msg(status.message, 'Model testing failed'));
+            }
+            await sleep(1200);
+        }
+
+        projectDetailCache.delete(project);
+        await ensureProjectDetailLoaded(project);
+        refreshData(latestStateData || undefined);
+        hideUploadProgress();
+        alert(msg(finalMessage, 'OK'));
+    } catch (e) {
+        hideUploadProgress();
+        alert(msg(String(e), 'Model testing failed'));
+    }
 }
 
 function openProjectUpload() {
@@ -2217,6 +2892,14 @@ function openProjectUpload() {
 function openProjectEditor(encodedName) {
     const projectName = decodeURIComponent(encodedName);
     const url = `/project_editor?project=${encodeURIComponent(projectName)}`;
+    window.open(url, '_blank');
+}
+
+function openProjectEditorAtImage(encodedName, encodedRel, encodedValidRel = '') {
+    const projectName = decodeURIComponent(encodedName);
+    const rel = decodeURIComponent(encodedRel);
+    const validRel = decodeURIComponent(encodedValidRel || '');
+    const url = `/project_editor?project=${encodeURIComponent(projectName)}&rel=${encodeURIComponent(rel)}${validRel ? `&valid_rel=${encodeURIComponent(validRel)}` : ''}`;
     window.open(url, '_blank');
 }
 
@@ -2269,19 +2952,57 @@ function fmtEtaSeconds(sec) {
     return `${s}s`;
 }
 
+function fmtBytes(bytes) {
+    const n = Number(bytes);
+    if (!Number.isFinite(n) || n < 0) return '-';
+    if (n < 1024) return `${n.toFixed(0)} B`;
+    if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+    if (n < 1024 * 1024 * 1024) return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+    return `${(n / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+}
+
+function buildBackupProgressDetail(status, fallbackText = '') {
+    const parts = [];
+    const project = String(status.project || '').trim();
+    if (project) parts.push(project);
+
+    const copied = Number(status.copied_bytes || 0);
+    const total = Number(status.total_bytes || 0);
+    if (total > 0) {
+        parts.push(`${fmtBytes(copied)} / ${fmtBytes(total)}`);
+    } else if (copied > 0) {
+        parts.push(fmtBytes(copied));
+    }
+
+    if (status.eta_sec !== null && status.eta_sec !== undefined) {
+        parts.push(`${t('backup_eta')}: ${fmtEtaSeconds(status.eta_sec)}`);
+    }
+
+    const targetPath = String(status.target_path || '').trim();
+    if (targetPath) {
+        parts.push(targetPath);
+    }
+
+    const message = msg(status.message || '');
+    if (message && !parts.includes(message)) {
+        parts.push(message);
+    }
+
+    return parts.length ? parts.join(' | ') : fallbackText;
+}
+
 async function backupProject(encodedName) {
     try {
         const project = decodeURIComponent(encodedName);
         const result = await runBackupTask(project, (status) => {
-            const etaText = status.eta_sec === null || status.eta_sec === undefined
-                ? project
-                : `${project} | ${t('backup_eta')}: ${fmtEtaSeconds(status.eta_sec)}`;
-            setUploadProgress(status.progress || 0, t('backup_progress'), etaText);
+            const detailText = buildBackupProgressDetail(status, project);
+            setUploadProgress(status.progress || 0, t('backup_progress'), detailText);
         });
-        setUploadProgress(100, t('backup_done'), result.target_path || '');
+        setUploadProgress(100, t('backup_done'), buildBackupProgressDetail(result, result.target_path || project));
         await sleep(500);
         hideUploadProgress();
         alert(msg(result.message, t('backup_done')));
+        refreshAll();
     } catch (e) {
         hideUploadProgress();
         alert(String(e.message || e));
@@ -2303,7 +3024,6 @@ async function runBackupTask(project, progressRenderer = null) {
     }
 
     while (true) {
-        await sleep(800);
         const status = await apiGet('/api/project/backup_status');
         if (String(status.id || '') !== taskId) continue;
 
@@ -2317,6 +3037,7 @@ async function runBackupTask(project, progressRenderer = null) {
         if (status.status === 'failed') {
             throw new Error(msg(status.message, 'Backup failed'));
         }
+        await sleep(600);
     }
 }
 
@@ -2332,16 +3053,15 @@ async function backupSelectedProjects() {
             const project = String(projects[i] || '');
             await runBackupTask(project, (status) => {
                 const overall = ((i + ((Number(status.progress || 0)) / 100)) / projects.length) * 100;
-                const etaText = status.eta_sec === null || status.eta_sec === undefined
-                    ? `${project} (${i + 1}/${projects.length})`
-                    : `${project} (${i + 1}/${projects.length}) | ${t('backup_eta')}: ${fmtEtaSeconds(status.eta_sec)}`;
-                setUploadProgress(overall, t('backup_batch_progress'), etaText);
+                const detailText = `${project} (${i + 1}/${projects.length}) | ${buildBackupProgressDetail(status, project)}`;
+                setUploadProgress(overall, t('backup_batch_progress'), detailText);
             });
         }
         setUploadProgress(100, t('backup_batch_done'), `${projects.length} project(s)`);
         await sleep(600);
         hideUploadProgress();
         alert(t('backup_batch_done'));
+        refreshAll();
     } catch (e) {
         hideUploadProgress();
         alert(String(e.message || e));
@@ -2368,6 +3088,10 @@ function uploadFileWithProgress(url, file, extraFields = {}, progressText = null
             } else {
                 setUploadProgress(0, progressText || t('uploading'));
             }
+        };
+
+        xhr.upload.onload = () => {
+            setUploadProgress(100, progressText || t('uploading'), t('server_processing'));
         };
 
         xhr.onload = () => {
@@ -2490,6 +3214,40 @@ async function refreshAll() {
     await applySnapshot(snapshot);
 }
 
+async function maybePromptQueueSessionRecovery() {
+    if (queueRecoveryPromptShown) return;
+    queueRecoveryPromptShown = true;
+
+    try {
+        const data = await apiGet('/api/queue_session/status');
+        if (!data.ok || !data.pending) return;
+
+        const projects = Array.isArray(data.projects) ? data.projects.filter(Boolean) : [];
+        const projectText = projects.length ? `:\n- ${projects.join('\n- ')}` : '';
+        const message = t('continue_last_session_message').replace('$PROJECTS$', projectText);
+
+        const shouldContinue = await showConfirmDialog({
+            title: t('continue_last_session_title'),
+            message,
+            confirmText: t('continue_last_session_confirm'),
+            cancelText: t('continue_last_session_ignore'),
+            confirmClass: 'btn-primary'
+        });
+
+        if (shouldContinue) {
+            const result = await apiGet('/api/queue_session/continue', { method: 'POST' });
+            alert(msg(result.message, t('continue_last_session_done')));
+            await refreshAll();
+            return;
+        }
+
+        const ignored = await apiGet('/api/queue_session/ignore', { method: 'POST' });
+        alert(msg(ignored.message, t('continue_last_session_ignored')));
+    } catch (e) {
+        console.error(e);
+    }
+}
+
 async function watchStateChanges() {
     if (changeLoopStarted) return;
     changeLoopStarted = true;
@@ -2529,5 +3287,142 @@ if (typeof ResizeObserver !== 'undefined') {
 }
 refreshAll().finally(() => {
     updateStickyLayoutMetrics();
-    watchStateChanges();
+    maybePromptQueueSessionRecovery().finally(() => {
+        watchStateChanges();
+    });
 });
+
+function showMsaSampleUpload(encodedProject, encodedRunFolder) {
+    const projectName = decodeURIComponent(encodedProject);
+    const runFolder = decodeURIComponent(encodedRunFolder);
+
+    const host = ensureModalHost();
+    if (!host) return;
+
+    host.innerHTML = `
+        <div class="web-modal-backdrop">
+            <div class="web-modal" role="dialog" aria-modal="true" aria-label="MSA Sample Testing">
+                <div class="web-modal-head">
+                    <div class="web-modal-title">MSA Sample Testing</div>
+                    <button class="web-modal-close" onclick="closeMsaSampleUpload()" aria-label="Close">×</button>
+                </div>
+                <div class="web-modal-body">
+                    <div class="small mb8">Upload a ZIP file containing sample images (.jpg/.png) and their labels (.txt) in YOLO format.</div>
+                    <div class="upload-area" id="msaUploadArea">
+                        <p>Click to select ZIP file or drag & drop</p>
+                        <input type="file" id="msaFileInput" accept=".zip" style="display:none;" onchange="handleMsaFileSelect(event, '${encodeURIComponent(projectName)}', '${encodeURIComponent(runFolder)}')">
+                    </div>
+                    <div id="msaUploadStatus" style="margin-top:12px;"></div>
+                </div>
+            </div>
+        </div>
+    `;
+
+    const uploadArea = document.getElementById('msaUploadArea');
+    const fileInput = document.getElementById('msaFileInput');
+
+    if (uploadArea && fileInput) {
+        uploadArea.addEventListener('click', () => fileInput.click());
+        uploadArea.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            uploadArea.style.backgroundColor = '#e8f5e9';
+        });
+        uploadArea.addEventListener('dragleave', (e) => {
+            e.preventDefault();
+            uploadArea.style.backgroundColor = '';
+        });
+        uploadArea.addEventListener('drop', (e) => {
+            e.preventDefault();
+            uploadArea.style.backgroundColor = '';
+            const files = e.dataTransfer.files;
+            if (files && files[0]) {
+                fileInput.files = files;
+                handleMsaFileSelect({ target: fileInput }, encodedProject, encodedRunFolder);
+            }
+        });
+    }
+}
+
+function closeMsaSampleUpload() {
+    const host = ensureModalHost();
+    if (host) host.innerHTML = '';
+}
+
+async function handleMsaFileSelect(event, encodedProject, encodedRunFolder) {
+    const projectName = decodeURIComponent(encodedProject);
+    const runFolder = decodeURIComponent(encodedRunFolder);
+    const fileInput = event.target;
+    const file = fileInput.files && fileInput.files[0];
+
+    if (!file) return;
+
+    if (!file.name.toLowerCase().endsWith('.zip')) {
+        alert('Please select a ZIP file');
+        return;
+    }
+
+    try {
+        const statusDiv = document.getElementById('msaUploadStatus');
+        if (statusDiv) {
+            statusDiv.innerHTML = '<div class="small">Uploading and processing...</div>';
+        }
+
+        const data = await uploadFileWithProgress(
+            '/api/project/model_testing_msa',
+            file,
+            { project: projectName, run_folder: runFolder },
+            'Processing MSA Sample'
+        );
+
+        if (!data.ok) {
+            if (statusDiv) {
+                statusDiv.innerHTML = `<div class="error-msg">${escapeHtml(data.message || 'Upload failed')}</div>`;
+            }
+            alert(data.message || 'MSA upload failed');
+            return;
+        }
+
+        if (statusDiv) {
+            const msa = data.msa_summary || {};
+            const results = msa.results || {};
+            const errorRate = Number(results.error_rate || 0).toFixed(2);
+            const html = `
+                <div class="success-msg mb8">MSA Sample Testing Completed!</div>
+                <div class="detail-stats">
+                    <div class="detail-stat-item">
+                        <div class="detail-stat-label">Total Images</div>
+                        <div class="detail-stat-value">${results.total_images || 0}</div>
+                    </div>
+                    <div class="detail-stat-item">
+                        <div class="detail-stat-label">Wrong Predictions</div>
+                        <div class="detail-stat-value">${results.wrong_images || 0}</div>
+                    </div>
+                    <div class="detail-stat-item">
+                        <div class="detail-stat-label">Error Rate</div>
+                        <div class="detail-stat-value">${errorRate}%</div>
+                    </div>
+                </div>
+                <button class="btn-primary" onclick="refreshProjectDetail('${encodeURIComponent(projectName)}'); closeMsaSampleUpload();">View Results</button>
+            `;
+            statusDiv.innerHTML = html;
+        }
+
+        setTimeout(() => {
+            refreshProjectDetail(projectName);
+            closeMsaSampleUpload();
+        }, 2000);
+
+    } catch (e) {
+        const statusDiv = document.getElementById('msaUploadStatus');
+        if (statusDiv) {
+            statusDiv.innerHTML = `<div class="error-msg">${escapeHtml(String(e.message || e))}</div>`;
+        }
+        alert(String(e.message || e));
+    }
+}
+
+function refreshProjectDetail(projectName) {
+    projectDetailCache.delete(projectName);
+    refreshData(latestStateData || undefined);
+}
+

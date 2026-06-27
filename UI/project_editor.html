@@ -102,6 +102,35 @@
             cursor: crosshair;
             background: #0b1220;
         }
+        .class-popup {
+            position: absolute;
+            min-width: 220px;
+            max-width: 320px;
+            max-height: 260px;
+            overflow: auto;
+            background: #0f182a;
+            border: 1px solid #2f405f;
+            border-radius: 12px;
+            box-shadow: 0 16px 40px rgba(0, 0, 0, 0.45);
+            padding: 6px;
+            z-index: 30;
+        }
+        .class-popup.hidden { display: none; }
+        .class-popup-item {
+            width: 100%;
+            text-align: left;
+            background: transparent;
+            color: var(--text);
+            border: 0;
+            border-radius: 8px;
+            padding: 8px 10px;
+            font-size: 12px;
+            font-weight: 600;
+        }
+        .class-popup-item:hover,
+        .class-popup-item.active {
+            background: #1a2740;
+        }
 
         .field { margin-top: 10px; }
         .field label {
@@ -145,19 +174,161 @@
             background: #0f182a;
             max-height: 260px;
             overflow: auto;
+            position: relative;
+        }
+        .image-table-head {
+            display: grid;
+            grid-template-columns: 54px minmax(0, 1.45fr) 0.95fr 138px 92px 0.7fr;
+            gap: 0;
+            border: 1px solid #2f405f;
+            border-bottom: 0;
+            border-radius: 10px 10px 0 0;
+            background: #12203a;
+            overflow: hidden;
+        }
+        .image-table-head .cell {
+            padding: 6px 8px;
+            border-right: 1px solid #243550;
+            font-size: 11px;
+            font-weight: 700;
+            color: #b8cae6;
+            text-transform: uppercase;
+        }
+        .image-table-head .cell:last-child { border-right: 0; }
+        .image-head-btn {
+            width: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 8px;
+            background: transparent;
+            color: inherit;
+            border: 0;
+            border-radius: 0;
+            padding: 0;
+            font: inherit;
+            text-transform: inherit;
+        }
+        .image-head-btn:hover { color: #e6edf8; }
+        .image-head-label {
+            min-width: 0;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        .image-head-sort {
+            flex: 0 0 auto;
+            color: #7ea2d8;
+            font-size: 11px;
+            min-width: 14px;
+            text-align: right;
+        }
+        .image-head-controls {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            min-width: 0;
+        }
+        .image-head-filter {
+            width: 100%;
+            border: 1px solid #2b3f60;
+            border-radius: 6px;
+            padding: 4px 6px;
+            background: #0f182a;
+            color: #d5e4fb;
+            font-size: 11px;
+            font-weight: 600;
+        }
+        .image-head-number {
+            width: 100%;
+            border: 1px solid #2b3f60;
+            border-radius: 6px;
+            padding: 4px 6px;
+            background: #0f182a;
+            color: #d5e4fb;
+            font-size: 11px;
+            font-weight: 600;
+        }
+        .bbox-legend {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px 12px;
+            margin: 8px 0 6px;
+            font-size: 11px;
+            color: #a9bddc;
+        }
+        .bbox-legend-item {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .bbox-legend-swatch {
+            width: 12px;
+            height: 12px;
+            border-radius: 3px;
+            border: 1px solid #304160;
+        }
+        .bbox-legend-swatch.less { background: rgba(239, 68, 68, 0.32); }
+        .bbox-legend-swatch.equal { background: rgba(34, 197, 94, 0.32); }
+        .bbox-legend-swatch.greater { background: rgba(245, 158, 11, 0.32); }
+        .bbox-legend-swatch.notequal { background: rgba(59, 130, 246, 0.28); }
+        .image-list.table-mode {
+            border-radius: 0 0 10px 10px;
         }
         .image-item {
-            padding: 8px 10px;
             border-bottom: 1px solid #1f2b41;
             font-size: 12px;
             cursor: pointer;
-            display: flex;
-            justify-content: space-between;
-            gap: 8px;
+            display: grid;
+            grid-template-columns: 54px minmax(0, 1.45fr) 0.95fr 138px 92px 0.7fr;
+            gap: 0;
+            align-items: stretch;
         }
         .image-item:last-child { border-bottom: 0; }
         .image-item.active { background: #1a2740; }
+        .image-item:hover { background: #142038; }
+        .image-item.bbox-less { background: rgba(239, 68, 68, 0.14); }
+        .image-item.bbox-equal { background: rgba(34, 197, 94, 0.14); }
+        .image-item.bbox-greater { background: rgba(245, 158, 11, 0.14); }
+        .image-item.bbox-notequal { background: rgba(59, 130, 246, 0.12); }
+        .image-item.bbox-less.active { background: rgba(239, 68, 68, 0.24); }
+        .image-item.bbox-equal.active { background: rgba(34, 197, 94, 0.24); }
+        .image-item.bbox-greater.active { background: rgba(245, 158, 11, 0.24); }
+        .image-item.bbox-notequal.active { background: rgba(59, 130, 246, 0.2); }
+        .image-item .cell {
+            padding: 7px 10px;
+            border-right: 1px solid #1f2b41;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        .image-item .cell:last-child { border-right: 0; }
+        .image-item .cell.name {
+            white-space: normal;
+            overflow-wrap: anywhere;
+            line-height: 1.25;
+        }
         .image-item-meta { color: #8ea0ba; font-size: 11px; }
+        .image-item-index { color: #cfe0fb; font-variant-numeric: tabular-nums; }
+        .image-item-anomaly {
+            font-weight: 700;
+        }
+        .image-item-anomaly.has {
+            color: #ff8f8f;
+        }
+        .image-item-anomaly.clean {
+            color: #7dd3a6;
+        }
+        .image-list-spacer {
+            position: relative;
+            width: 100%;
+        }
+        .image-list-window {
+            position: absolute;
+            left: 0;
+            right: 0;
+            top: 0;
+        }
 
         .box-list {
             border: 1px solid #2f405f;
@@ -182,6 +353,35 @@
             margin-top: 8px;
             font-size: 12px;
             color: #9dd6ff;
+        }
+        .load-progress {
+            margin-top: 8px;
+            border: 1px solid #2c3b55;
+            border-radius: 10px;
+            background: #0f182a;
+            padding: 8px 10px;
+        }
+        .load-progress.hidden { display: none; }
+        .load-progress-head {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 10px;
+            margin-bottom: 6px;
+            font-size: 12px;
+            color: #cfe6ff;
+        }
+        .load-progress-bar {
+            height: 8px;
+            border-radius: 999px;
+            overflow: hidden;
+            background: #18253a;
+        }
+        .load-progress-fill {
+            height: 100%;
+            width: 0%;
+            background: linear-gradient(90deg, #3b82f6 0%, #22c55e 100%);
+            transition: width 0.18s ease;
         }
         .hint { color: #93a4bf; font-size: 12px; margin-top: 6px; }
         .image-info {
@@ -226,6 +426,7 @@
 
     <div class="action-toolbar">
         <button class="btn-ok" onclick="saveLabel()">Save ảnh</button>
+        <button class="btn-primary" id="promoteTrainBtn" onclick="saveLabelAndMoveToTrain()" style="display:none">Save + Move to train</button>
         <button class="btn-primary" onclick="nextImage()">Next ảnh</button>
         <button class="btn-light" onclick="selectAllBoxes()">Select all</button>
         <button class="btn-danger" onclick="deleteSelectedBoxes()">Xóa bbox đã chọn</button>
@@ -237,8 +438,18 @@
         <div class="card">
             <div class="canvas-wrap">
                 <canvas id="editorCanvas"></canvas>
+                <div id="classPopup" class="class-popup hidden"></div>
             </div>
             <div class="status-line" id="statusLine">Loading...</div>
+            <div class="load-progress hidden" id="loadProgress">
+                <div class="load-progress-head">
+                    <span id="loadProgressText">Loading...</span>
+                    <span id="loadProgressPct">0%</span>
+                </div>
+                <div class="load-progress-bar">
+                    <div class="load-progress-fill" id="loadProgressFill"></div>
+                </div>
+            </div>
             <div class="hint">Kéo thả bbox để đổi vị trí. Click bbox để chọn.</div>
             <div class="image-info" id="imageInfo">
                 <div><b>Tên:</b> -</div>
@@ -257,25 +468,16 @@
             <div class="field">
                 <label>Danh sách ảnh</label>
                 <div class="row wrap" style="margin-bottom:8px;">
-                    <button class="btn-light" onclick="prevPage()">Prev page</button>
-                    <button class="btn-light" onclick="nextPage()">Next page</button>
-                    <span class="small" id="pageInfo">Page -/-</span>
+                    <span class="small" id="pageInfo">0 ảnh</span>
                 </div>
-                <div class="row wrap" style="margin-bottom:8px;">
-                    <select id="sortBy" onchange="onSortChanged()">
-                        <option value="name">Sort: Name</option>
-                        <option value="date">Sort: Date</option>
-                        <option value="class">Sort: Class</option>
-                    </select>
-                    <select id="sortDir" onchange="onSortChanged()">
-                        <option value="asc">ASC</option>
-                        <option value="desc">DESC</option>
-                    </select>
-                    <select id="classFilter" onchange="onClassFilterChanged()">
-                        <option value="">Filter class: All</option>
-                    </select>
+                <div class="bbox-legend">
+                    <span class="bbox-legend-item"><span class="bbox-legend-swatch less"></span>Thiếu</span>
+                    <span class="bbox-legend-item"><span class="bbox-legend-swatch equal"></span>Đúng</span>
+                    <span class="bbox-legend-item"><span class="bbox-legend-swatch greater"></span>Dư</span>
+                    <span class="bbox-legend-item"><span class="bbox-legend-swatch notequal"></span>Khác</span>
                 </div>
-                <div class="image-list" id="imageList"></div>
+                <div class="image-table-head" id="imageTableHead"></div>
+                <div class="image-list table-mode" id="imageList"></div>
             </div>
 
             <div class="field">
@@ -305,20 +507,31 @@
 
 <script>
 const projectName = {{ project_name | tojson }};
+const editorQuery = new URLSearchParams(window.location.search);
+const initialRel = editorQuery.get('rel') || '';
+const initialValidRel = editorQuery.get('valid_rel') || '';
 let images = [];
 let imageItems = [];
 let idx = 0;
 let classes = [];
 let currentPage = 1;
-let pageSize = 200;
+let pageSize = 1000000;
 let totalImages = 0;
 let totalPages = 0;
 let currentQuery = '';
 let sortBy = 'name';
 let sortDir = 'asc';
 let classFilter = '';
+let expectedBoxCount = '';
+let boxCompare = 'all';
+let anomalyFilter = 'all';
+let anomalySensitivity = 'medium';
+let pendingInitialRel = initialRel;
+let promoteValidRel = initialValidRel;
 let layoutLeftFr = 1.8;
 let bboxVisible = true;
+const imageRowHeight = 52;
+const imageListOverscan = 10;
 
 let canvas = null;
 let ctx = null;
@@ -334,6 +547,8 @@ let drawMode = 'none'; // none | move | resize | draw
 let resizeHandle = ''; // nw|ne|sw|se
 let dragStart = {x: 0, y: 0};
 let dragOffset = {x: 0, y: 0};
+let classPopupState = { visible: false, boxIndex: -1 };
+let currentImageAnomalyItems = [];
 
 function esc(text) {
     return String(text ?? '')
@@ -355,6 +570,47 @@ async function apiGet(url, opts = {}) {
 
 function setStatus(text) {
     document.getElementById('statusLine').textContent = text;
+}
+
+function setEditorLoadProgress(percent, text = 'Loading...') {
+    const box = document.getElementById('loadProgress');
+    const textEl = document.getElementById('loadProgressText');
+    const pctEl = document.getElementById('loadProgressPct');
+    const fillEl = document.getElementById('loadProgressFill');
+    if (!box || !textEl || !pctEl || !fillEl) return;
+
+    const pct = Math.max(0, Math.min(100, Number(percent) || 0));
+    textEl.textContent = String(text || 'Loading...');
+    pctEl.textContent = `${pct.toFixed(0)}%`;
+    fillEl.style.width = `${pct}%`;
+    box.classList.remove('hidden');
+}
+
+function hideEditorLoadProgress() {
+    const box = document.getElementById('loadProgress');
+    if (!box) return;
+    box.classList.add('hidden');
+}
+
+function getClassPopupEl() {
+    return document.getElementById('classPopup');
+}
+
+function hideClassPopup() {
+    const el = getClassPopupEl();
+    if (!el) return;
+    classPopupState.visible = false;
+    classPopupState.boxIndex = -1;
+    el.classList.add('hidden');
+    el.innerHTML = '';
+}
+
+function updatePromoteButton() {
+    const btn = document.getElementById('promoteTrainBtn');
+    if (!btn) return;
+    const currentRel = String(images[idx] || '');
+    const enabled = !!promoteValidRel && !!initialRel && currentRel.toLowerCase() === String(initialRel || '').toLowerCase();
+    btn.style.display = enabled ? '' : 'none';
 }
 
 function applyLayoutRatio(leftFrRaw) {
@@ -401,7 +657,98 @@ function setImageInfo(name, modifiedAt, linkHref) {
 function updatePageInfo() {
     const el = document.getElementById('pageInfo');
     if (!el) return;
-    el.textContent = `Page ${currentPage}/${Math.max(1, totalPages)} • ${images.length}/${totalImages}`;
+    el.textContent = `${totalImages} ảnh`;
+}
+
+function sortIndicatorFor(field) {
+    if (sortBy !== field) return '↕';
+    return sortDir === 'desc' ? '↓' : '↑';
+}
+
+function renderImageTableHead() {
+    const head = document.getElementById('imageTableHead');
+    if (!head) return;
+    const classOptions = ['<option value="">Tất cả</option>']
+        .concat(classes.map((name, i) => `<option value="${i}" ${String(classFilter) === String(i) ? 'selected' : ''}>${esc(i)}: ${esc(name)}</option>`))
+        .join('');
+    const anomalyOptions = [
+        ['all', 'Tất cả'],
+        ['has', 'Có ABN'],
+        ['clean', 'Sạch'],
+    ].map(([value, label]) => `<option value="${value}" ${anomalyFilter === value ? 'selected' : ''}>${esc(label)}</option>`).join('');
+    const anomalySensitivityOptions = [
+        ['low', 'Nhẹ'],
+        ['medium', 'Vừa'],
+        ['high', 'Nhạy'],
+    ].map(([value, label]) => `<option value="${value}" ${anomalySensitivity === value ? 'selected' : ''}>${esc(label)}</option>`).join('');
+    const boxCompareOptions = [
+        ['all', 'Tất cả'],
+        ['less', 'Thiếu'],
+        ['equal', 'Đúng'],
+        ['greater', 'Dư'],
+        ['notequal', 'Khác'],
+    ].map(([value, label]) => `<option value="${value}" ${boxCompare === value ? 'selected' : ''}>${esc(label)}</option>`).join('');
+
+    head.innerHTML = `
+        <div class="cell">#</div>
+        <div class="cell">
+            <button type="button" class="image-head-btn" onclick="toggleImageSort('name')" title="Sort theo tên ảnh">
+                <span class="image-head-label">Tên ảnh</span>
+                <span class="image-head-sort">${sortIndicatorFor('name')}</span>
+            </button>
+        </div>
+        <div class="cell">
+            <button type="button" class="image-head-btn" onclick="toggleImageSort('date')" title="Sort theo ngày sửa">
+                <span class="image-head-label">Ngày sửa</span>
+                <span class="image-head-sort">${sortIndicatorFor('date')}</span>
+            </button>
+        </div>
+        <div class="cell">
+            <div class="image-head-controls">
+                <button type="button" class="image-head-btn" title="So sánh số bbox">
+                    <span class="image-head-label">BBox</span>
+                    <span class="image-head-sort"></span>
+                </button>
+                <input
+                    type="number"
+                    min="0"
+                    class="image-head-number"
+                    id="expectedBoxCountHead"
+                    placeholder="Số kỳ vọng"
+                    value="${esc(expectedBoxCount)}"
+                    oninput="onExpectedBoxCountChanged(this.value)"
+                >
+                <select class="image-head-filter" id="boxCompareHead" onchange="onBoxCompareChanged(this.value)">
+                    ${boxCompareOptions}
+                </select>
+            </div>
+        </div>
+        <div class="cell">
+            <div class="image-head-controls">
+                <button type="button" class="image-head-btn" title="Bbox bất thường theo trung bình class">
+                    <span class="image-head-label">ABN</span>
+                    <span class="image-head-sort"></span>
+                </button>
+                <select class="image-head-filter" id="anomalyFilterHead" onchange="onAnomalyFilterChanged(this.value)">
+                    ${anomalyOptions}
+                </select>
+                <select class="image-head-filter" id="anomalySensitivityHead" onchange="onAnomalySensitivityChanged(this.value)">
+                    ${anomalySensitivityOptions}
+                </select>
+            </div>
+        </div>
+        <div class="cell">
+            <div class="image-head-controls">
+                <button type="button" class="image-head-btn" onclick="toggleImageSort('class')" title="Sort theo class">
+                    <span class="image-head-label">Class</span>
+                    <span class="image-head-sort">${sortIndicatorFor('class')}</span>
+                </button>
+                <select class="image-head-filter" id="classFilterHead" onchange="onHeaderClassFilterChanged(this.value)">
+                    ${classOptions}
+                </select>
+            </div>
+        </div>
+    `;
 }
 
 function toggleBboxVisible() {
@@ -437,6 +784,33 @@ function hitBoxIndex(x, y) {
     return -1;
 }
 
+function getBoxLabelRect(b) {
+    const label = `${b.cls}: ${classNameByIndex(b.cls)}`;
+    ctx.font = '12px Segoe UI';
+    const tw = ctx.measureText(label).width + 10;
+    const th = 18;
+    const tx = b.x;
+    const ty = Math.max(0, b.y - th);
+    return {
+        x: tx,
+        y: ty,
+        w: tw,
+        h: th,
+    };
+}
+
+function hitBoxLabelIndex(x, y) {
+    if (!ctx) return -1;
+    for (let i = boxes.length - 1; i >= 0; i--) {
+        const b = boxes[i];
+        const r = getBoxLabelRect(b);
+        if (x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h) {
+            return i;
+        }
+    }
+    return -1;
+}
+
 function handlePoints(b) {
     return {
         nw: {x: b.x, y: b.y},
@@ -458,8 +832,9 @@ function hitResizeHandle(x, y, b) {
     return '';
 }
 
-function parseYoloLabel(text) {
+function parseYoloLabel(text, anomalyIndexSet = null) {
     const rows = [];
+    let boxIndex = 0;
     const lines = String(text || '').replace(/\r\n/g, '\n').split('\n');
     for (const line of lines) {
         const s = line.trim();
@@ -485,7 +860,9 @@ function parseYoloLabel(text) {
             y: clamp(y, 0, Math.max(0, drawH - bh)),
             w: clamp(bw, 1, drawW),
             h: clamp(bh, 1, drawH),
+            isAnomaly: !!(anomalyIndexSet && anomalyIndexSet.has(boxIndex)),
         });
+        boxIndex += 1;
     }
     return rows;
 }
@@ -504,6 +881,48 @@ function renderRawText() {
     document.getElementById('rawLabel').value = toYoloText();
 }
 
+function getAnomalyItemByBoxIndex(boxIndex) {
+    return currentImageAnomalyItems.find(item => Number(item.box_index) === Number(boxIndex)) || null;
+}
+
+function formatAnomalyReasonText(anomalyItem) {
+    if (!anomalyItem || !Array.isArray(anomalyItem.reasons) || anomalyItem.reasons.length === 0) return '';
+    return anomalyItem.reasons.map(reason => {
+        if (String(reason.metric || '') === 'name') {
+            const actual = String(reason.group_name || reason.value || '').trim();
+            const expected = String(reason.best_group || '').trim();
+            return `NAME ${actual} -> ${expected}`;
+        }
+        const metric = String(reason.metric || '').toUpperCase();
+        const value = Number(reason.value || 0).toFixed(2);
+        const mean = Number(reason.mean || 0).toFixed(2);
+        return `${metric} ${value} / avg ${mean}`;
+    }).join(', ');
+}
+
+async function refreshCurrentImageAnomalies(rel = '') {
+    const currentRel = String(rel || images[idx] || '').trim();
+    if (!currentRel) return;
+    const data = await apiGet(`/api/project_label?project=${encodeURIComponent(projectName)}&rel=${encodeURIComponent(currentRel)}&anomaly_sensitivity=${encodeURIComponent(anomalySensitivity)}`);
+    currentImageAnomalyItems = Array.isArray(data.anomaly_items) ? data.anomaly_items : [];
+    const anomalyIndexSet = new Set(Array.isArray(data.anomaly_box_indices) ? data.anomaly_box_indices.map(x => Number(x)) : []);
+    boxes.forEach((box, boxIndex) => {
+        box.isAnomaly = anomalyIndexSet.has(boxIndex);
+    });
+    return {
+        rel: currentRel,
+        bboxAnomalyCount: Number(data.bbox_anomaly_count || 0),
+    };
+}
+
+function setCurrentImageStatus(rel, bboxAnomalyCount = 0, prefix = '') {
+    const currentRel = String(rel || images[idx] || '').trim();
+    const anomalyText = Number(bboxAnomalyCount || 0) > 0 ? ` | ABN: ${Number(bboxAnomalyCount || 0)}` : '';
+    const prefixText = prefix ? `${prefix} | ` : '';
+    setStatus(`${prefixText}Image ${idx + 1}/${images.length}: ${currentRel}${anomalyText}`);
+    draw();
+}
+
 function renderBoxList() {
     const boxList = document.getElementById('boxList');
     if (!boxes.length) {
@@ -514,7 +933,10 @@ function renderBoxList() {
     boxList.innerHTML = boxes.map((b, i) => {
         const active = selectedBoxes.has(i) ? 'active' : '';
         const info = `${Math.round(b.x)},${Math.round(b.y)} ${Math.round(b.w)}x${Math.round(b.h)}`;
-        return `<div class="box-item ${active}" onclick="selectBox(${i})"><span>#${i + 1} - ${esc(classNameByIndex(b.cls))}</span><span>${info}</span></div>`;
+        const warn = b.isAnomaly ? ' [ABN]' : '';
+        const anomalyText = formatAnomalyReasonText(getAnomalyItemByBoxIndex(i));
+        const detail = anomalyText ? `${info} | ${anomalyText}` : info;
+        return `<div class="box-item ${active}" onclick="selectBox(${i})" title="${esc(detail)}"><span>#${i + 1} - ${esc(classNameByIndex(b.cls))}${warn}</span><span>${esc(detail)}</span></div>`;
     }).join('');
 }
 
@@ -531,6 +953,47 @@ function renderClassSelect() {
     }
 }
 
+function showClassPopupForBox(boxIndex, rect) {
+    const el = getClassPopupEl();
+    const wrap = document.querySelector('.canvas-wrap');
+    if (!el || !wrap || boxIndex < 0 || !boxes[boxIndex]) return;
+
+    selectedBox = boxIndex;
+    selectedBoxes = new Set([boxIndex]);
+    renderClassSelect();
+
+    const currentCls = Number(boxes[boxIndex].cls || 0);
+    const rows = classes.length
+        ? classes.map((name, i) => `
+            <button
+                type="button"
+                class="class-popup-item ${i === currentCls ? 'active' : ''}"
+                onclick="selectClassFromPopup(${boxIndex}, ${i})"
+            >${esc(i)}: ${esc(name)}</button>
+        `).join('')
+        : `<button type="button" class="class-popup-item active" onclick="selectClassFromPopup(${boxIndex}, ${currentCls})">${esc(currentCls)}: ${esc(classNameByIndex(currentCls))}</button>`;
+
+    el.innerHTML = rows;
+    el.classList.remove('hidden');
+    classPopupState.visible = true;
+    classPopupState.boxIndex = boxIndex;
+
+    const popupLeft = Math.max(8, Math.min(rect.x, Math.max(8, wrap.clientWidth - 240)));
+    const popupTop = Math.max(8, Math.min(rect.y + rect.h + 6, Math.max(8, wrap.clientHeight - 120)));
+    el.style.left = `${popupLeft}px`;
+    el.style.top = `${popupTop}px`;
+}
+
+function selectClassFromPopup(boxIndex, clsIndex) {
+    if (boxIndex < 0 || !boxes[boxIndex]) return;
+    boxes[boxIndex].cls = Number(clsIndex || 0);
+    selectedBox = boxIndex;
+    selectedBoxes = new Set([boxIndex]);
+    hideClassPopup();
+    draw();
+    setStatus(`Đã đổi class bbox #${boxIndex + 1} -> ${classNameByIndex(boxes[boxIndex].cls)}`);
+}
+
 function draw() {
     if (!ctx || !baseImg) return;
     ctx.clearRect(0, 0, drawW, drawH);
@@ -545,20 +1008,21 @@ function draw() {
 
     boxes.forEach((b, i) => {
         const active = selectedBoxes.has(i);
+        const anomaly = !!b.isAnomaly;
         ctx.lineWidth = active ? 3 : 2;
-        ctx.strokeStyle = active ? '#22c55e' : '#3b82f6';
-        ctx.fillStyle = active ? 'rgba(34,197,94,0.16)' : 'rgba(59,130,246,0.16)';
+        ctx.strokeStyle = active ? '#22c55e' : (anomaly ? '#ef4444' : '#3b82f6');
+        ctx.fillStyle = active ? 'rgba(34,197,94,0.16)' : (anomaly ? 'rgba(239,68,68,0.14)' : 'rgba(59,130,246,0.16)');
 
         ctx.fillRect(b.x, b.y, b.w, b.h);
         ctx.strokeRect(b.x, b.y, b.w, b.h);
 
-        const label = `${b.cls}: ${classNameByIndex(b.cls)}`;
+        const label = `${anomaly ? '! ' : ''}${b.cls}: ${classNameByIndex(b.cls)}`;
         ctx.font = '12px Segoe UI';
         const tw = ctx.measureText(label).width + 10;
         const th = 18;
         const tx = b.x;
         const ty = Math.max(0, b.y - th);
-        ctx.fillStyle = active ? 'rgba(34,197,94,0.95)' : 'rgba(59,130,246,0.95)';
+        ctx.fillStyle = active ? 'rgba(34,197,94,0.95)' : (anomaly ? 'rgba(239,68,68,0.95)' : 'rgba(59,130,246,0.95)');
         ctx.fillRect(tx, ty, tw, th);
         ctx.fillStyle = '#001020';
         ctx.fillText(label, tx + 5, ty + 13);
@@ -579,8 +1043,13 @@ function draw() {
 }
 
 function selectBox(i) {
+    hideClassPopup();
     selectedBox = i;
     selectedBoxes = new Set([i]);
+    const anomalyText = formatAnomalyReasonText(getAnomalyItemByBoxIndex(i));
+    if (anomalyText) {
+        setStatus(`BBox #${i + 1} bất thường: ${anomalyText}`);
+    }
     draw();
 }
 
@@ -590,11 +1059,13 @@ function changeSelectedBoxClass() {
     const cls = parseInt(sel.value, 10);
     if (Number.isNaN(cls)) return;
     boxes[selectedBox].cls = cls;
+    hideClassPopup();
     draw();
 }
 
 function deleteSelectedBox() {
     if (selectedBox < 0 || !boxes[selectedBox]) return;
+    hideClassPopup();
     boxes.splice(selectedBox, 1);
     selectedBoxes = new Set();
     selectedBox = boxes.length ? Math.min(selectedBox, boxes.length - 1) : -1;
@@ -610,6 +1081,7 @@ function selectAllBoxes() {
 
 function deleteSelectedBoxes() {
     if (!selectedBoxes.size) return;
+    hideClassPopup();
     boxes = boxes.filter((_, i) => !selectedBoxes.has(i));
     selectedBoxes = new Set();
     selectedBox = boxes.length ? 0 : -1;
@@ -626,14 +1098,7 @@ async function loadClasses() {
         } else {
             document.getElementById('classList').innerHTML = classes.map((x, i) => `${i}: ${esc(x)}`).join('<br>');
         }
-        const filterSel = document.getElementById('classFilter');
-        if (filterSel) {
-            const old = filterSel.value;
-            let html = '<option value=\"\">Filter class: All</option>';
-            html += classes.map((x, i) => `<option value=\"${i}\">${i}: ${esc(x)}</option>`).join('');
-            filterSel.innerHTML = html;
-            filterSel.value = old && old !== '' ? old : '';
-        }
+        renderImageTableHead();
         renderClassSelect();
     } catch (e) {
         document.getElementById('classList').textContent = String(e.message || e);
@@ -644,20 +1109,80 @@ function renderImageList() {
     const box = document.getElementById('imageList');
     if (!box) return;
     if (!imageItems.length) {
-        box.innerHTML = '<div class=\"image-item\">Không có ảnh</div>';
+        box.innerHTML = '<div class=\"image-item\"><div class=\"cell\" style=\"grid-column:1 / -1\">Không có ảnh</div></div>';
         return;
     }
 
-    box.innerHTML = imageItems.map((it, i) => {
+    const viewportHeight = Math.max(box.clientHeight || 260, 120);
+    const scrollTop = Math.max(0, box.scrollTop || 0);
+    const total = imageItems.length;
+    const start = Math.max(0, Math.floor(scrollTop / imageRowHeight) - imageListOverscan);
+    const visibleCount = Math.ceil(viewportHeight / imageRowHeight) + imageListOverscan * 2;
+    const end = Math.min(total, start + visibleCount);
+    const offsetY = start * imageRowHeight;
+
+    const rows = [];
+    for (let i = start; i < end; i += 1) {
+        const it = imageItems[i];
         const active = i === idx ? 'active' : '';
         const clsText = Array.isArray(it.class_ids) && it.class_ids.length ? it.class_ids.join(',') : '-';
-        return `<div class=\"image-item ${active}\" onclick=\"selectImageByIndex(${i})\"><span>${i + 1}. ${esc(it.name || it.rel)}</span><span class=\"image-item-meta\">${esc(it.modified_at || '-')} • cls:${esc(clsText)}</span></div>`;
-    }).join('');
+        const bboxCount = Number(it.bbox_count || 0);
+        const anomalyCount = Number(it.bbox_anomaly_count || 0);
+        let compareClass = '';
+        if (String(expectedBoxCount || '').trim() !== '') {
+            const expected = Number(expectedBoxCount);
+            if (Number.isFinite(expected)) {
+                if (bboxCount < expected) compareClass = 'bbox-less';
+                else if (bboxCount > expected) compareClass = 'bbox-greater';
+                else compareClass = 'bbox-equal';
+                if (boxCompare === 'notequal' && bboxCount !== expected) {
+                    compareClass = 'bbox-notequal';
+                }
+            }
+        }
+        rows.push(`
+            <div class="image-item ${active} ${compareClass}" style="height:${imageRowHeight}px" onclick="selectImageByIndex(${i})">
+                <div class="cell image-item-index">${i + 1}</div>
+                <div class="cell name" title="${esc(it.name || it.rel)}">${esc(it.name || it.rel)}</div>
+                <div class="cell image-item-meta" title="${esc(it.modified_at || '-')}">${esc(it.modified_at || '-')}</div>
+                <div class="cell image-item-index" title="BBox: ${bboxCount}">${bboxCount}</div>
+                <div class="cell image-item-anomaly ${anomalyCount > 0 ? 'has' : 'clean'}" title="BBox bất thường: ${anomalyCount}">${anomalyCount > 0 ? `! ${anomalyCount}` : '0'}</div>
+                <div class="cell image-item-meta" title="${esc(clsText)}">${esc(clsText)}</div>
+            </div>
+        `);
+    }
+
+    box.innerHTML = `
+        <div class="image-list-spacer" style="height:${total * imageRowHeight}px">
+            <div class="image-list-window" style="transform:translateY(${offsetY}px)">
+                ${rows.join('')}
+            </div>
+        </div>
+    `;
+}
+
+function ensureImageIndexVisible(targetIndex) {
+    const box = document.getElementById('imageList');
+    if (!box || targetIndex < 0) return;
+    const top = targetIndex * imageRowHeight;
+    const bottom = top + imageRowHeight;
+    const viewTop = box.scrollTop;
+    const viewBottom = viewTop + box.clientHeight;
+
+    if (top < viewTop) {
+        box.scrollTop = top;
+    } else if (bottom > viewBottom) {
+        box.scrollTop = Math.max(0, bottom - box.clientHeight);
+    }
 }
 
 async function loadImages(page = 1, query = currentQuery) {
+    setEditorLoadProgress(5, 'Đang tải danh sách ảnh...');
     currentQuery = String(query || '').trim();
-    const data = await apiGet(`/api/project_images?project=${encodeURIComponent(projectName)}&page=${page}&page_size=${pageSize}&q=${encodeURIComponent(currentQuery)}&sort_by=${encodeURIComponent(sortBy)}&sort_dir=${encodeURIComponent(sortDir)}&class_filter=${encodeURIComponent(classFilter)}`);
+    const targetRel = pendingInitialRel || '';
+    const expectedBoxesParam = String(expectedBoxCount || '').trim();
+    const data = await apiGet(`/api/project_images?project=${encodeURIComponent(projectName)}&page=${page}&page_size=${pageSize}&q=${encodeURIComponent(currentQuery)}&sort_by=${encodeURIComponent(sortBy)}&sort_dir=${encodeURIComponent(sortDir)}&class_filter=${encodeURIComponent(classFilter)}&expected_boxes=${encodeURIComponent(expectedBoxesParam)}&box_compare=${encodeURIComponent(boxCompare)}&anomaly_filter=${encodeURIComponent(anomalyFilter)}&anomaly_sensitivity=${encodeURIComponent(anomalySensitivity)}&rel=${encodeURIComponent(targetRel)}`);
+    setEditorLoadProgress(45, 'Đã nhận danh sách ảnh, đang xử lý...');
     images = Array.isArray(data.images) ? data.images : [];
     imageItems = Array.isArray(data.items) ? data.items : images.map(rel => ({rel, name: rel, modified_at: '-', class_ids: []}));
     currentPage = Number(data.page || 1);
@@ -668,11 +1193,24 @@ async function loadImages(page = 1, query = currentQuery) {
         renderImageList();
         setStatus('Không có ảnh trong thư mục image/images');
         setImageInfo('-', '-', '');
+        setEditorLoadProgress(100, 'Không có ảnh');
+        setTimeout(() => hideEditorLoadProgress(), 500);
         return;
     }
     idx = 0;
+    if (pendingInitialRel) {
+        const targetIdx = images.findIndex(x => String(x || '').toLowerCase() === String(pendingInitialRel || '').toLowerCase());
+        if (targetIdx >= 0) {
+            idx = targetIdx;
+        }
+        pendingInitialRel = '';
+    }
+    setEditorLoadProgress(70, 'Đang render danh sách ảnh...');
     renderImageList();
+    setEditorLoadProgress(82, 'Đang tải ảnh đầu tiên...');
     await loadCurrentImageAndLabel();
+    setEditorLoadProgress(100, 'Đã tải xong');
+    setTimeout(() => hideEditorLoadProgress(), 350);
 }
 
 function onImageSearchChanged() {
@@ -680,30 +1218,52 @@ function onImageSearchChanged() {
     loadImages(1, keyword);
 }
 
-function onSortChanged() {
-    sortBy = String(document.getElementById('sortBy').value || 'name');
-    sortDir = String(document.getElementById('sortDir').value || 'asc');
+function toggleImageSort(field) {
+    const key = String(field || 'name');
+    if (sortBy === key) {
+        sortDir = sortDir === 'asc' ? 'desc' : 'asc';
+    } else {
+        sortBy = key;
+        sortDir = 'asc';
+    }
+    renderImageTableHead();
     loadImages(1, currentQuery);
 }
 
-function onClassFilterChanged() {
-    classFilter = String(document.getElementById('classFilter').value || '');
+function onHeaderClassFilterChanged(value) {
+    classFilter = String(value || '');
+    renderImageTableHead();
     loadImages(1, currentQuery);
 }
 
-async function prevPage() {
-    if (currentPage <= 1) return;
-    await loadImages(currentPage - 1, currentQuery);
+function onExpectedBoxCountChanged(value) {
+    expectedBoxCount = String(value || '').trim();
+    renderImageTableHead();
+    loadImages(1, currentQuery);
 }
 
-async function nextPage() {
-    if (currentPage >= totalPages) return;
-    await loadImages(currentPage + 1, currentQuery);
+function onBoxCompareChanged(value) {
+    boxCompare = String(value || 'all');
+    renderImageTableHead();
+    loadImages(1, currentQuery);
+}
+
+function onAnomalyFilterChanged(value) {
+    anomalyFilter = String(value || 'all');
+    renderImageTableHead();
+    loadImages(1, currentQuery);
+}
+
+function onAnomalySensitivityChanged(value) {
+    anomalySensitivity = String(value || 'medium');
+    renderImageTableHead();
+    loadImages(1, currentQuery);
 }
 
 async function loadCurrentImageAndLabel() {
     if (!images[idx]) return;
     const rel = images[idx];
+    setEditorLoadProgress(10, `Đang tải ảnh: ${rel}`);
 
     const img = new Image();
     img.src = `/api/project_image_file?project=${encodeURIComponent(projectName)}&rel=${encodeURIComponent(rel)}&t=${Date.now()}`;
@@ -711,6 +1271,7 @@ async function loadCurrentImageAndLabel() {
         img.onload = resolve;
         img.onerror = reject;
     });
+    setEditorLoadProgress(50, 'Đã tải ảnh, đang đọc label...');
 
     baseImg = img;
     const wrap = document.querySelector('.canvas-wrap');
@@ -723,8 +1284,11 @@ async function loadCurrentImageAndLabel() {
     canvas.width = drawW;
     canvas.height = drawH;
 
-    const data = await apiGet(`/api/project_label?project=${encodeURIComponent(projectName)}&rel=${encodeURIComponent(rel)}`);
-    boxes = parseYoloLabel(data.text || '');
+    const data = await apiGet(`/api/project_label?project=${encodeURIComponent(projectName)}&rel=${encodeURIComponent(rel)}&anomaly_sensitivity=${encodeURIComponent(anomalySensitivity)}`);
+    setEditorLoadProgress(72, 'Đã đọc label, đang dựng bbox...');
+    currentImageAnomalyItems = Array.isArray(data.anomaly_items) ? data.anomaly_items : [];
+    const anomalyIndexSet = new Set(Array.isArray(data.anomaly_box_indices) ? data.anomaly_box_indices.map(x => Number(x)) : []);
+    boxes = parseYoloLabel(data.text || '', anomalyIndexSet);
     selectedBox = boxes.length ? 0 : -1;
     selectedBoxes = selectedBox >= 0 ? new Set([selectedBox]) : new Set();
 
@@ -736,13 +1300,31 @@ async function loadCurrentImageAndLabel() {
     }
 
     draw();
-    setStatus(`Image ${idx + 1}/${images.length}: ${rel}`);
+    const anomalyText = Number(data.bbox_anomaly_count || 0) > 0 ? ` | ABN: ${Number(data.bbox_anomaly_count || 0)}` : '';
+    setStatus(`Image ${idx + 1}/${images.length}: ${rel}${anomalyText}`);
+    ensureImageIndexVisible(idx);
     renderImageList();
+    updatePromoteButton();
+    setEditorLoadProgress(100, `Đã tải xong: ${rel}`);
+    setTimeout(() => hideEditorLoadProgress(), 250);
+}
+
+async function switchToImageIndex(i, options = {}) {
+    if (!images.length) return;
+    const targetIdx = Math.max(0, Math.min(Number(i || 0), Math.max(0, images.length - 1)));
+    const saveCurrent = options.saveCurrent !== false;
+    if (targetIdx === idx) return;
+    if (saveCurrent && images[idx]) {
+        await saveLabel();
+    }
+    idx = targetIdx;
+    ensureImageIndexVisible(idx);
+    renderImageList();
+    await loadCurrentImageAndLabel();
 }
 
 async function selectImageByIndex(i) {
-    idx = Math.max(0, Math.min(Number(i || 0), Math.max(0, images.length - 1)));
-    await loadCurrentImageAndLabel();
+    await switchToImageIndex(i, { saveCurrent: true });
 }
 
 async function saveLabel() {
@@ -754,19 +1336,75 @@ async function saveLabel() {
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({ project: projectName, rel, text })
     });
-    setStatus(`Đã lưu label: ${rel}`);
+    const anomalyInfo = await refreshCurrentImageAnomalies(rel);
+    setCurrentImageStatus(rel, anomalyInfo?.bboxAnomalyCount || 0, 'Đã lưu label');
+}
+
+async function saveLabelAndMoveToTrain() {
+    if (!images[idx]) return;
+    if (!promoteValidRel) {
+        setStatus('Ảnh này không có liên kết valid để chuyển sang train');
+        return;
+    }
+
+    const rel = images[idx];
+    const text = toYoloText();
+    const data = await apiGet('/api/project/promote_valid_to_train', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({
+            project: projectName,
+            source_rel: rel,
+            valid_rel: promoteValidRel,
+            text
+        })
+    });
+    promoteValidRel = '';
+    updatePromoteButton();
+    setStatus(`Đã chuyển sang train và xóa khỏi valid: ${data.valid_rel || rel}`);
 }
 
 async function nextImage() {
     if (!images.length) return;
-    await saveLabel();
     if (idx < images.length - 1) {
-        idx += 1;
-        await loadCurrentImageAndLabel();
-    } else if (currentPage < totalPages) {
-        await loadImages(currentPage + 1, currentQuery);
+        await switchToImageIndex(idx + 1, { saveCurrent: true });
     } else {
         setStatus('Đã tới ảnh cuối cùng');
+    }
+}
+
+async function prevImage() {
+    if (!images.length) return;
+    if (idx > 0) {
+        await switchToImageIndex(idx - 1, { saveCurrent: true });
+    } else {
+        setStatus('Đã ở ảnh đầu tiên');
+    }
+}
+
+function shouldIgnoreEditorHotkeys(target) {
+    if (!target) return false;
+    const tag = String(target.tagName || '').toUpperCase();
+    if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || tag === 'BUTTON') {
+        return true;
+    }
+    return !!target.closest?.('.class-popup');
+}
+
+async function onEditorKeyDown(e) {
+    if (shouldIgnoreEditorHotkeys(e.target)) return;
+    if (e.defaultPrevented) return;
+    if (e.ctrlKey || e.altKey || e.metaKey || e.shiftKey) return;
+
+    if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
+        e.preventDefault();
+        await nextImage();
+        return;
+    }
+
+    if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
+        e.preventDefault();
+        await prevImage();
     }
 }
 
@@ -776,8 +1414,20 @@ function onMouseDown(e) {
     const p = canvasPointFromEvent(e);
     dragStart = {x: p.x, y: p.y};
 
+    const labelHit = hitBoxLabelIndex(p.x, p.y);
+    if (labelHit >= 0) {
+        const labelRect = getBoxLabelRect(boxes[labelHit]);
+        showClassPopupForBox(labelHit, labelRect);
+        dragging = false;
+        drawMode = 'none';
+        resizeHandle = '';
+        draw();
+        return;
+    }
+
     const hit = hitBoxIndex(p.x, p.y);
     if (hit >= 0) {
+        hideClassPopup();
         selectedBox = hit;
         selectedBoxes = new Set([hit]);
 
@@ -800,6 +1450,7 @@ function onMouseDown(e) {
     }
 
     // Draw new bbox on empty area
+    hideClassPopup();
     const clsSel = document.getElementById('boxClassSelect');
     const defaultCls = Number.isNaN(parseInt(clsSel.value, 10)) ? 0 : parseInt(clsSel.value, 10);
     const newBox = { cls: defaultCls, x: p.x, y: p.y, w: 1, h: 1 };
@@ -862,6 +1513,14 @@ function onMouseUp() {
     draw();
 }
 
+function onDocumentMouseDown(e) {
+    if (!classPopupState.visible) return;
+    const popup = getClassPopupEl();
+    if (popup && popup.contains(e.target)) return;
+    if (canvas && e.target === canvas) return;
+    hideClassPopup();
+}
+
 (function initCanvasEvents() {
     canvas = document.getElementById('editorCanvas');
     ctx = canvas.getContext('2d');
@@ -869,6 +1528,14 @@ function onMouseUp() {
     canvas.addEventListener('mousedown', onMouseDown);
     window.addEventListener('mousemove', onMouseMove);
     window.addEventListener('mouseup', onMouseUp);
+    document.addEventListener('mousedown', onDocumentMouseDown);
+    document.addEventListener('keydown', onEditorKeyDown);
+})();
+
+(function initVirtualImageList() {
+    const imageList = document.getElementById('imageList');
+    if (!imageList) return;
+    imageList.addEventListener('scroll', () => renderImageList());
 })();
 
 (function initLayoutRatio() {

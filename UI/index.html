@@ -4,6 +4,7 @@
     <meta charset="utf-8">
     <title>AI Train Monitor</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link rel="icon" type="image/svg+xml" href="/UI/src/icons/logo-ai-modern.svg">
     <link rel="stylesheet" href="/UI/style.css">
 </head>
 <body>
@@ -11,19 +12,9 @@
     <div class="sticky-top-panel">
         <div class="hero">
                 <div class="hero-top">
-                    <div>
+                    <div class="hero-title-block">
                         <h1 data-i18n="app_title">AI Train Monitor</h1>
                         <p id="heroSubtitle">Project: -</p>
-                    </div>
-
-                    <div class="lang-wrap">
-                        <span class="lang-note">User: {{ auth_user }}</span>
-                        <span class="lang-note" data-i18n="language_label">NgĂ´n ngá»¯</span>
-                        <div class="lang-toggle" role="group" aria-label="Language switch">
-                            <button class="lang-btn active" id="btnLangVi" onclick="setLanguage('vi')">VI</button>
-                            <button class="lang-btn" id="btnLangEn" onclick="setLanguage('en')">EN</button>
-                        </div>
-                        <div class="pill">Port 820</div>
                     </div>
                 </div>
 
@@ -48,9 +39,15 @@
                         <div class="stat-label" data-i18n="project_count">Sá»‘ project</div>
                         <div class="stat-value" id="projectCount">0</div>
                     </div>
-                    <div class="stat">
-                        <div class="stat-label" data-i18n="train_monitor">Train monitor</div>
-                        <div class="stat-value stat-small">{{ train_monitor_url }}</div>
+                </div>
+
+                <div class="lang-wrap">
+                    <div class="lang-stack">
+                        <div class="lang-toggle" role="group" aria-label="Language switch">
+                            <button class="lang-btn active" id="btnLangVi" onclick="setLanguage('vi')">VI</button>
+                            <button class="lang-btn" id="btnLangEn" onclick="setLanguage('en')">EN</button>
+                        </div>
+                        <div class="pill">Port 820</div>
                     </div>
                 </div>
 
@@ -129,10 +126,16 @@
                     <span class="toolbar-icon" aria-hidden="true">N</span>
                     <span class="toolbar-text">Telegram notification</span>
                 </button>
-                <button class="btn-dark toolbar-icon-btn toolbar-bottom-btn" onclick="logout()" data-i18n="logout" data-tooltip-key="logout" data-icon-key="logout">
-                    <span class="toolbar-icon" aria-hidden="true">O</span>
-                    <span class="toolbar-text">Logout</span>
-                </button>
+                <div class="toolbar-bottom-group">
+                    <div class="toolbar-user-block">
+                        <span class="toolbar-user-label">User</span>
+                        <span class="toolbar-user-name">{{ auth_user }}</span>
+                    </div>
+                    <button class="btn-dark toolbar-icon-btn toolbar-user-action" onclick="logout()" data-i18n="logout" data-tooltip-key="logout" data-icon-key="logout">
+                        <span class="toolbar-icon" aria-hidden="true">O</span>
+                        <span class="toolbar-text">Logout</span>
+                    </button>
+                </div>
             </div>
         </aside>
 
@@ -143,6 +146,10 @@
                     class="search-input"
                     type="text"
                     placeholder="Search project..."
+                    autocomplete="off"
+                    autocapitalize="off"
+                    autocorrect="off"
+                    spellcheck="false"
                     oninput="setSearchQuery(this.value)"
                 />
 

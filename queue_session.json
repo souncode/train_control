@@ -1,0 +1,13 @@
+{
+  "saved_at": "2026-06-27 15:09:23",
+  "current": "AUDI_FINAL - Object_Detection - Camera2-Left-V8",
+  "queue": [
+    "AUDI_FINAL - Object_Detection - Camera1-Right-V8",
+    "AUDI_FINAL - Object_Detection - Camera3-RightOn-V7"
+  ],
+  "projects": [
+    "AUDI_FINAL - Object_Detection - Camera2-Left-V8",
+    "AUDI_FINAL - Object_Detection - Camera1-Right-V8",
+    "AUDI_FINAL - Object_Detection - Camera3-RightOn-V7"
+  ]
+}

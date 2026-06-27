@@ -13,65 +13,101 @@ import zipfile
 import tempfile
 import threading
 import subprocess
+import struct
 import time
 import socket
 import hmac
-from pathlib import Path
+import math
 from datetime import datetime
+from pathlib import Path
 from urllib.request import urlopen
 from urllib.error import URLError, HTTPError
 
-from flask import Flask, jsonify, request, render_template, abort, send_file, after_this_request, session, redirect, url_for
+from flask import Flask, jsonify, request, abort, send_file, after_this_request, redirect, url_for
 
-from notify import TelegramNotifier
-
-# ===================== Cáº¤U HĂŒNH =====================
-def int_env(name: str, default: int, minimum: int | None = None, maximum: int | None = None) -> int:
-    try:
-        value = int(os.getenv(name, str(default)))
-    except Exception:
-        value = int(default)
-    if minimum is not None:
-        value = max(minimum, value)
-    if maximum is not None:
-        value = min(maximum, value)
-    return value
-
-
-ROOT_DIR = Path(r"D:\Object Detection\admin")   # sá»­a láº¡i Ä‘Æ°á»ng dáº«n tháº­t cá»§a báº¡n
-TRAIN_FILE = "Train_model_AI.py"
-PORT = 820
-HOST = "0.0.0.0"
-CONTINUE_IF_ERROR = True
-WAITRESS_THREADS = int_env("TRAIN_CONTROL_WAITRESS_THREADS", 48, minimum=8, maximum=256)
-WAITRESS_CONNECTION_LIMIT = int_env("TRAIN_CONTROL_WAITRESS_CONNECTION_LIMIT", 1000, minimum=32, maximum=10000)
-WAITRESS_CHANNEL_TIMEOUT = int_env("TRAIN_CONTROL_WAITRESS_CHANNEL_TIMEOUT", 120, minimum=30, maximum=600)
-WAITRESS_CLEANUP_INTERVAL = int_env("TRAIN_CONTROL_WAITRESS_CLEANUP_INTERVAL", 30, minimum=5, maximum=300)
-WAITRESS_MAX_REQUEST_BODY_SIZE = int_env("TRAIN_CONTROL_WAITRESS_MAX_REQUEST_BODY_SIZE", 1073741824, minimum=1048576)
-BACKUP_ROOT = Path(os.getenv("TRAIN_CONTROL_BACKUP_ROOT", r"F:\Object Detection\admin"))
-BACKUP_COPY_CHUNK_SIZE = int_env("TRAIN_CONTROL_BACKUP_CHUNK_SIZE", 1024 * 1024, minimum=64 * 1024, maximum=8 * 1024 * 1024)
-
-TRAIN_MONITOR_HOST = "127.0.0.1"
-TRAIN_MONITOR_PORT = 8008
-TRAIN_MONITOR_TIMEOUT = 2
-
-TELEGRAM_BOT_TOKEN = "YOUR_BOT_TOKEN"
-TELEGRAM_CHAT_ID = "YOUR_CHAT_ID"
-
-PROJECT_LOG_MAX_LINES = 300
-API_LOG_TAIL_LINES = 150
-TRAIN_MONITOR_LOG_TAIL = 150
-AUTH_SECRET_KEY = os.getenv("TRAIN_CONTROL_SECRET_KEY", "change_me_traincontrol_secret")
-AUTH_SESSION_TTL_SECONDS = int(os.getenv("TRAIN_CONTROL_SESSION_TTL_SECONDS", "43200"))
-LV2_PASSWORD = os.getenv("TRAIN_CONTROL_LV2_PASSWORD", "080200")
-LV2_SESSION_TTL_SECONDS = int(os.getenv("TRAIN_CONTROL_LV2_SESSION_TTL_SECONDS", "1800"))
-USER_FILE_NAME = "user.js"
-TRAIN_HISTORY_FILE_NAME = "train_history.jsonl"
-AUDIT_LOG_FILE_NAME = "audit_log.jsonl"
-
-# Má» TRAIN TRONG TERMINAL RIĂNG
-OPEN_TRAIN_IN_NEW_TERMINAL = True
-# ====================================================
+from tc_auth import (
+    clear_auth,
+    current_auth_user as auth_current_auth_user,
+    get_next_url,
+    is_authenticated,
+    is_lv2_authenticated,
+    mark_authenticated,
+    mark_lv2_authenticated,
+    require_lv2_json,
+)
+from tc_notify import (
+    build_notifier,
+    is_notify_enabled,
+    notify_train_finished,
+    send_telegram_notification_async,
+)
+from tc_routes_basic import register_basic_routes
+from tc_backup import (
+    build_backup_status_payload as backup_build_backup_status_payload,
+    start_project_backup as backup_start_project_backup,
+)
+from tc_config import (
+    API_LOG_TAIL_LINES,
+    AUDIT_LOG_FILE_NAME,
+    AUTH_SECRET_KEY,
+    BACKUP_COPY_CHUNK_SIZE,
+    BACKUP_ROOT,
+    CONTINUE_IF_ERROR,
+    DEFAULT_USER_CREDENTIALS,
+    HOST,
+    LV2_PASSWORD,
+    OPEN_TRAIN_IN_NEW_TERMINAL,
+    PORT,
+    PROJECT_LOG_MAX_LINES,
+    ROOT_DIR,
+    TRAIN_FILE,
+    TRAIN_HISTORY_FILE_NAME,
+    TRAIN_MONITOR_HOST,
+    TRAIN_MONITOR_LOG_TAIL,
+    TRAIN_MONITOR_PORT,
+    TRAIN_MONITOR_TIMEOUT,
+    USER_FILE_NAME,
+    WAITRESS_CHANNEL_TIMEOUT,
+    WAITRESS_CLEANUP_INTERVAL,
+    WAITRESS_CONNECTION_LIMIT,
+    WAITRESS_MAX_REQUEST_BODY_SIZE,
+    WAITRESS_THREADS,
+)
+from tc_dataset import (
+    clear_project_dataset_dirs,
+    collect_importable_data_files,
+    dataset_config_file_path as dataset_dataset_config_file_path,
+    get_available_duplicate_name,
+    is_path_inside,
+    is_valid_project_name,
+    load_dataset_config as dataset_load_dataset_config,
+    read_shared_dataset_config as dataset_read_shared_dataset_config,
+    save_dataset_config as dataset_save_dataset_config,
+    save_uploaded_project_zip as dataset_save_uploaded_project_zip,
+    validate_dataset_config as dataset_validate_dataset_config,
+    write_shared_dataset_config as dataset_write_shared_dataset_config,
+)
+from tc_persistence import (
+    append_audit_log as persist_append_audit_log,
+    append_train_history_file as persist_append_train_history_file,
+    audit_log_file_path as persist_audit_log_file_path,
+    load_train_history_file as persist_load_train_history_file,
+    load_user_credentials as persist_load_user_credentials,
+    now_str as persist_now_str,
+    save_default_user_file_if_missing as persist_save_default_user_file_if_missing,
+    train_history_file_path as persist_train_history_file_path,
+    user_file_path as persist_user_file_path,
+    verify_password as persist_verify_password,
+)
+from tc_runtime import (
+    CURRENT_TRAIN_CONTROL,
+    MONITOR_CACHE,
+    NOTIFY_STATE,
+    STATE,
+    state_cond,
+    state_lock,
+    train_queue,
+)
 
 BASE_DIR = Path(__file__).resolve().parent
 
@@ -90,103 +126,146 @@ app.config["MAX_CONTENT_LENGTH"] = WAITRESS_MAX_REQUEST_BODY_SIZE
 app.config["JSON_AS_ASCII"] = False
 app.config["JSONIFY_PRETTYPRINT_REGULAR"] = False
 
-state_lock = threading.Lock()
-state_cond = threading.Condition(state_lock)
-train_queue = queue.Queue()
 worker_thread = None
 monitor_thread = None
 app_runtime_initialized = False
-backup_lock = threading.Lock()
-
-STATE = {
-    "projects": {},
-    "queue": [],
-    "current": None,
-    "history": [],
-    "worker_running": False,
-    "last_scan": None,
-    "version": 0,
-}
-
-MONITOR_CACHE = {
-    "status_ok": False,
-    "status": {},
-    "history_ok": False,
-    "history_state": {},
-    "logs": [],
-    "matched_project_name": None,
-    "status_error": None,
-    "status_url": None,
-    "history_error": None,
-    "history_url": None,
-}
-
-CURRENT_TRAIN_CONTROL = {
-    "project": None,
-    "project_path": "",
-    "pid": None,
-    "stop_requested": False,
-}
-
-NOTIFY_STATE = {
-    "enabled": False
-}
-
-BACKUP_TASK = {
+revalidate_task_lock = threading.Lock()
+REVALIDATE_TASK = {
     "id": None,
     "project": "",
-    "target_path": "",
-    "status": "idle",   # idle | running | success | failed
+    "run_folder": "",
+    "status": "idle",
     "progress": 0.0,
-    "eta_sec": None,
-    "copied_bytes": 0,
-    "total_bytes": 0,
+    "message": "",
+    "detail": "",
     "started_at": 0.0,
     "ended_at": 0.0,
-    "message": "",
+    "result": None,
 }
+model_test_task_lock = threading.Lock()
+MODEL_TEST_TASK = {
+    "id": None,
+    "project": "",
+    "run_folder": "",
+    "status": "idle",
+    "progress": 0.0,
+    "message": "",
+    "detail": "",
+    "started_at": 0.0,
+    "ended_at": 0.0,
+    "result": None,
+}
+project_fs_task_lock = threading.Lock()
+PROJECT_FS_TASK = {
+    "id": None,
+    "project": "",
+    "operation": "",
+    "target": "",
+    "status": "idle",
+    "progress": 0.0,
+    "message": "",
+    "detail": "",
+    "started_at": 0.0,
+    "ended_at": 0.0,
+    "result": None,
+}
+dataset_task_lock = threading.Lock()
+DATASET_TASK = {
+    "id": None,
+    "project": "",
+    "operation": "",
+    "status": "idle",
+    "progress": 0.0,
+    "message": "",
+    "detail": "",
+    "started_at": 0.0,
+    "ended_at": 0.0,
+    "result": None,
+}
+bbox_analysis_cache_lock = threading.Lock()
+BBOX_ANALYSIS_CACHE = {}
 
 IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".bmp", ".webp", ".gif", ".tif", ".tiff"}
 PUBLIC_PATHS = {"/login"}
-DEFAULT_USER_CREDENTIALS = {
-    "username": "admin",
-    "password": {
-        "algorithm": "pbkdf2_sha256",
-        "iterations": 200000,
-        "salt": "NrTlFkGs4SYsNQ6kxWuZyg==",
-        "hash": "r5H5ClA1hq9LzlKTK5xqXmPcZ+5eKZNthomUmbmWZ9k=",
+
+
+def queue_session_file_path():
+    return BASE_DIR / "queue_session.json"
+
+
+def build_queue_session_payload_locked():
+    queue_names = [str(x or "").strip() for x in list(STATE.get("queue") or []) if str(x or "").strip()]
+    current_name = str(STATE.get("current") or "").strip()
+    projects = []
+
+    if current_name:
+        projects.append(current_name)
+    for name in queue_names:
+        if name not in projects:
+            projects.append(name)
+
+    return {
+        "saved_at": now_str(),
+        "current": current_name,
+        "queue": queue_names,
+        "projects": projects,
     }
-}
 
 
-def now_str():
-    return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+def clear_queue_session_file():
+    try:
+        queue_session_file_path().unlink(missing_ok=True)
+    except Exception:
+        pass
+
+
+def sync_queue_session_file_locked():
+    payload = build_queue_session_payload_locked()
+    if not payload["projects"]:
+        clear_queue_session_file()
+        return
+    try:
+        queue_session_file_path().write_text(
+            json.dumps(payload, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+    except Exception:
+        pass
+
+
+def load_queue_session_file():
+    p = queue_session_file_path()
+    if not p.exists() or not p.is_file():
+        return {}
+    try:
+        data = json.loads(p.read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
 
 
 def user_file_path():
-    return BASE_DIR / USER_FILE_NAME
+    return persist_user_file_path(BASE_DIR, USER_FILE_NAME)
 
 
 def train_history_file_path():
-    return BASE_DIR / TRAIN_HISTORY_FILE_NAME
+    return persist_train_history_file_path(BASE_DIR, TRAIN_HISTORY_FILE_NAME)
 
 
 def audit_log_file_path():
-    return BASE_DIR / AUDIT_LOG_FILE_NAME
+    return persist_audit_log_file_path(BASE_DIR, AUDIT_LOG_FILE_NAME)
+
+
+def now_str():
+    return persist_now_str()
 
 
 def current_auth_user() -> str:
-    return str(session.get("auth_user", "") or "").strip() or "anonymous"
+    return auth_current_auth_user()
 
 
 def append_audit_log(entry: dict):
-    try:
-        p = audit_log_file_path()
-        line = json.dumps(entry or {}, ensure_ascii=False)
-        with p.open("a", encoding="utf-8") as f:
-            f.write(line + "\n")
-    except Exception:
-        pass
+    persist_append_audit_log(BASE_DIR, AUDIT_LOG_FILE_NAME, entry)
 
 
 def write_audit_log(action: str, status: str, project: str = "", target: str = "", details: str = ""):
@@ -208,52 +287,15 @@ def write_audit_log(action: str, status: str, project: str = "", target: str = "
 
 
 def save_default_user_file_if_missing():
-    p = user_file_path()
-    if p.exists():
-        return
-    try:
-        p.write_text(json.dumps(DEFAULT_USER_CREDENTIALS, ensure_ascii=False, indent=2), encoding="utf-8")
-    except Exception:
-        pass
+    persist_save_default_user_file_if_missing(BASE_DIR, USER_FILE_NAME, DEFAULT_USER_CREDENTIALS)
 
 
 def append_train_history_file(entry: dict):
-    try:
-        p = train_history_file_path()
-        line = json.dumps(entry or {}, ensure_ascii=False)
-        with p.open("a", encoding="utf-8") as f:
-            f.write(line + "\n")
-    except Exception:
-        pass
+    persist_append_train_history_file(BASE_DIR, TRAIN_HISTORY_FILE_NAME, entry)
 
 
 def load_train_history_file(max_items: int = 500):
-    p = train_history_file_path()
-    if not p.exists() or not p.is_file():
-        return []
-
-    rows = []
-    try:
-        with p.open("r", encoding="utf-8") as f:
-            for line in f:
-                raw = str(line or "").strip()
-                if not raw:
-                    continue
-                try:
-                    data = json.loads(raw)
-                except Exception:
-                    continue
-                if isinstance(data, dict):
-                    rows.append({
-                        "project": str(data.get("project", "") or "").strip(),
-                        "status": str(data.get("status", "") or "").strip(),
-                        "time": str(data.get("time", "") or "").strip(),
-                        "returncode": data.get("returncode"),
-                    })
-    except Exception:
-        return []
-
-    return rows[-max_items:]
+    return persist_load_train_history_file(BASE_DIR, TRAIN_HISTORY_FILE_NAME, max_items=max_items)
 
 
 def record_train_history_locked(project_name: str, status: str, returncode=None, when: str | None = None):
@@ -269,135 +311,12 @@ def record_train_history_locked(project_name: str, status: str, returncode=None,
     return entry
 
 
-def _parse_user_file_text(text: str):
-    raw = str(text or "").strip()
-    if not raw:
-        return {}
-
-    # Support both pure JSON and `module.exports = {...}` style.
-    if raw.startswith("module.exports"):
-        m = re.search(r"\{.*\}", raw, flags=re.DOTALL)
-        if m:
-            raw = m.group(0)
-
-    return json.loads(raw)
-
-
 def load_user_credentials():
-    save_default_user_file_if_missing()
-
-    try:
-        raw = user_file_path().read_text(encoding="utf-8")
-        data = _parse_user_file_text(raw)
-        if isinstance(data, dict):
-            username = str(data.get("username", "")).strip()
-            pwd = data.get("password", {})
-            if username and isinstance(pwd, dict):
-                algo = str(pwd.get("algorithm", "")).strip().lower()
-                iterations = int(pwd.get("iterations", 0))
-                salt = str(pwd.get("salt", "")).strip()
-                hash_b64 = str(pwd.get("hash", "")).strip()
-                if algo == "pbkdf2_sha256" and iterations > 0 and salt and hash_b64:
-                    return {
-                        "username": username,
-                        "password": {
-                            "algorithm": algo,
-                            "iterations": iterations,
-                            "salt": salt,
-                            "hash": hash_b64,
-                        }
-                    }
-    except Exception:
-        pass
-
-    return dict(DEFAULT_USER_CREDENTIALS)
+    return persist_load_user_credentials(BASE_DIR, USER_FILE_NAME, DEFAULT_USER_CREDENTIALS)
 
 
 def verify_password(password: str, creds: dict):
-    try:
-        pwd = (creds or {}).get("password", {})
-        if str(pwd.get("algorithm", "")).lower() != "pbkdf2_sha256":
-            return False
-        iterations = int(pwd.get("iterations", 0))
-        salt = base64.b64decode(str(pwd.get("salt", "")).encode("utf-8"))
-        expected = base64.b64decode(str(pwd.get("hash", "")).encode("utf-8"))
-        got = hashlib.pbkdf2_hmac("sha256", (password or "").encode("utf-8"), salt, iterations)
-        return hmac.compare_digest(got, expected)
-    except Exception:
-        return False
-
-
-def get_next_url(default="/"):
-    next_url = (request.values.get("next", "") or "").strip()
-    if not next_url.startswith("/"):
-        return default
-    if next_url.startswith("//"):
-        return default
-    return next_url or default
-
-
-def is_authenticated():
-    if not bool(session.get("auth")):
-        return False
-    try:
-        exp = int(session.get("auth_exp", 0))
-    except Exception:
-        return False
-    return exp > int(time.time())
-
-
-def mark_authenticated(username: str):
-    session["auth"] = True
-    session["auth_user"] = str(username or "").strip() or "admin"
-    session["auth_exp"] = int(time.time()) + AUTH_SESSION_TTL_SECONDS
-
-
-def is_lv2_authenticated():
-    try:
-        exp = int(session.get("auth_lv2_exp", 0))
-    except Exception:
-        return False
-    return exp > int(time.time())
-
-
-def mark_lv2_authenticated():
-    session["auth_lv2"] = True
-    session["auth_lv2_exp"] = int(time.time()) + LV2_SESSION_TTL_SECONDS
-
-
-def clear_auth():
-    session.pop("auth", None)
-    session.pop("auth_user", None)
-    session.pop("auth_exp", None)
-    session.pop("auth_lv2", None)
-    session.pop("auth_lv2_exp", None)
-
-
-def require_lv2_json():
-    if is_lv2_authenticated():
-        return None
-    return jsonify({"ok": False, "message": "LV2 password required"}), 403
-
-
-def is_valid_project_name(name: str) -> bool:
-    text = str(name or "").strip()
-    if not text:
-        return False
-    if text in {".", ".."}:
-        return False
-    if re.search(r'[\\/:*?"<>|]', text):
-        return False
-    return True
-
-
-def get_available_duplicate_name(source_name: str) -> str:
-    base = f"{str(source_name or '').strip()} - Copy".strip()
-    candidate = base
-    idx = 2
-    while (ROOT_DIR / candidate).exists():
-        candidate = f"{base} {idx}"
-        idx += 1
-    return candidate
+    return persist_verify_password(password, creds)
 
 
 def clear_train_history_locked():
@@ -408,117 +327,46 @@ def clear_train_history_locked():
         pass
 
 
-def clear_project_dataset_dirs(project_path: Path):
-    removed = []
-    for folder_name in ("runs", "test", "train", "valid"):
-        target = (project_path / folder_name).resolve()
-        if not is_path_inside(target, project_path):
-            continue
-        if target.exists() and target.is_dir():
-            shutil.rmtree(target)
-            removed.append(folder_name)
-    return removed
-
-
 def dataset_config_file_path() -> Path:
-    return BASE_DIR / "dataset_config.json"
+    return dataset_dataset_config_file_path(BASE_DIR)
 
 
 def read_shared_dataset_config():
-    p = dataset_config_file_path()
-    if not p.exists() or not p.is_file():
-        return {}
-    try:
-        data = json.loads(p.read_text(encoding="utf-8"))
-        return data if isinstance(data, dict) else {}
-    except Exception:
-        return {}
+    return dataset_read_shared_dataset_config(BASE_DIR)
 
 
 def write_shared_dataset_config(data: dict):
-    p = dataset_config_file_path()
-    p.write_text(json.dumps(data or {}, ensure_ascii=False, indent=2), encoding="utf-8")
+    dataset_write_shared_dataset_config(BASE_DIR, data)
 
 
 def load_dataset_config(project_path: Path):
-    defaults = {
-        "train_percent": 80,
-        "valid_percent": 20,
-        "test_percent": 0,
-        "shuffle": True,
-        "seed": 42,
-        "split_by_class": False,
-        "train_all_data": False,
-    }
-
-    data = read_shared_dataset_config()
-
-    if not isinstance(data, dict):
-        return dict(defaults)
-
-    try:
-        cfg = dict(defaults)
-        for key in ("train_percent", "valid_percent", "test_percent"):
-            try:
-                cfg[key] = int(data.get(key, cfg[key]))
-            except Exception:
-                pass
-        cfg["shuffle"] = bool(data.get("shuffle", cfg["shuffle"]))
-        try:
-            cfg["seed"] = int(data.get("seed", cfg["seed"]))
-        except Exception:
-            pass
-        cfg["split_by_class"] = bool(data.get("split_by_class", cfg["split_by_class"]))
-        cfg["train_all_data"] = bool(data.get("train_all_data", cfg["train_all_data"]))
-        return cfg
-    except Exception:
-        return dict(defaults)
+    return dataset_load_dataset_config(BASE_DIR, project_path)
 
 
 def validate_dataset_config(cfg: dict):
-    try:
-        train_pct = int(cfg.get("train_percent", 0))
-        valid_pct = int(cfg.get("valid_percent", 0))
-        test_pct = int(cfg.get("test_percent", 0))
-        seed = int(cfg.get("seed", 42))
-    except Exception:
-        return False, "Tỷ lệ dataset không hợp lệ", None
-
-    shuffle_enabled = bool(cfg.get("shuffle", True))
-    split_by_class = bool(cfg.get("split_by_class", False))
-    train_all_data = bool(cfg.get("train_all_data", False))
-
-    values = [train_pct, valid_pct, test_pct]
-    if any(x < 0 or x > 100 for x in values):
-        return False, "Tỷ lệ dataset phải nằm trong khoảng 0-100", None
-    if (train_pct + valid_pct + test_pct) != 100:
-        return False, "Tổng Train/Validation/Test phải bằng 100", None
-
-    return True, None, {
-        "train_percent": train_pct,
-        "valid_percent": valid_pct,
-        "test_percent": test_pct,
-        "shuffle": shuffle_enabled,
-        "seed": seed,
-        "split_by_class": split_by_class,
-        "train_all_data": train_all_data,
-    }
+    return dataset_validate_dataset_config(cfg)
 
 
 def save_dataset_config(project_path: Path, cfg: dict):
-    ok, err, clean_cfg = validate_dataset_config(cfg)
-    if not ok:
-        return False, err, None
-    try:
-        write_shared_dataset_config(clean_cfg)
-        return True, None, clean_cfg
-    except Exception as e:
-        return False, f"Không lưu được dataset config: {e}", None
+    return dataset_save_dataset_config(BASE_DIR, project_path, cfg)
 
 
 def bump_state_version_locked():
     STATE["version"] = int(STATE.get("version", 0)) + 1
     state_cond.notify_all()
+
+
+def clear_monitor_cache_locked():
+    MONITOR_CACHE["status_ok"] = False
+    MONITOR_CACHE["status"] = {}
+    MONITOR_CACHE["history_ok"] = False
+    MONITOR_CACHE["history_state"] = {}
+    MONITOR_CACHE["logs"] = []
+    MONITOR_CACHE["matched_project_name"] = None
+    MONITOR_CACHE["status_error"] = None
+    MONITOR_CACHE["status_url"] = None
+    MONITOR_CACHE["history_error"] = None
+    MONITOR_CACHE["history_url"] = None
 
 
 def monitor_snapshot_signature(status_ok, status_data, history_ok, history_state, logs, status_error, history_error):
@@ -611,167 +459,6 @@ def build_notify_state_payload_locked():
     }
 
 
-def build_backup_status_payload():
-    with backup_lock:
-        payload = dict(BACKUP_TASK)
-    payload["ok"] = True
-    return payload
-
-
-def reset_backup_task_locked():
-    BACKUP_TASK.update({
-        "id": None,
-        "project": "",
-        "target_path": "",
-        "status": "idle",
-        "progress": 0.0,
-        "eta_sec": None,
-        "copied_bytes": 0,
-        "total_bytes": 0,
-        "started_at": 0.0,
-        "ended_at": 0.0,
-        "message": "",
-    })
-
-
-def safe_backup_target_path(project_name: str) -> Path:
-    target_path = (BACKUP_ROOT / str(project_name or "").strip()).resolve()
-    backup_root_resolved = BACKUP_ROOT.resolve()
-    if target_path == backup_root_resolved or backup_root_resolved not in target_path.parents:
-        raise ValueError("Invalid backup target path")
-    return target_path
-
-
-def estimate_backup_eta(total_bytes: int, copied_bytes: int, started_at: float) -> int | None:
-    if total_bytes <= 0 or copied_bytes <= 0 or started_at <= 0:
-        return None
-    elapsed = max(0.001, time.time() - started_at)
-    speed = copied_bytes / elapsed
-    if speed <= 0:
-        return None
-    remaining = max(0, total_bytes - copied_bytes)
-    return max(0, int(remaining / speed))
-
-
-def calculate_directory_size(source_dir: Path) -> int:
-    total = 0
-    for root, _, files in os.walk(source_dir):
-        root_path = Path(root)
-        for name in files:
-            try:
-                total += (root_path / name).stat().st_size
-            except Exception:
-                pass
-    return max(1, total)
-
-
-def update_backup_progress(copied_bytes: int, total_bytes: int):
-    with backup_lock:
-        if BACKUP_TASK.get("status") != "running":
-            return
-        BACKUP_TASK["copied_bytes"] = int(copied_bytes)
-        BACKUP_TASK["total_bytes"] = int(total_bytes)
-        BACKUP_TASK["progress"] = max(0.0, min(100.0, (copied_bytes / max(1, total_bytes)) * 100.0))
-        BACKUP_TASK["eta_sec"] = estimate_backup_eta(total_bytes, copied_bytes, float(BACKUP_TASK.get("started_at") or 0.0))
-
-
-def copy_project_with_progress(source_dir: Path, target_dir: Path, total_bytes: int):
-    copied_bytes = 0
-    for root, dirs, files in os.walk(source_dir):
-        root_path = Path(root)
-        rel_root = root_path.relative_to(source_dir)
-        dst_root = target_dir / rel_root
-        dst_root.mkdir(parents=True, exist_ok=True)
-
-        for dir_name in dirs:
-            (dst_root / dir_name).mkdir(parents=True, exist_ok=True)
-
-        for file_name in files:
-            src_file = root_path / file_name
-            dst_file = dst_root / file_name
-            shutil.copystat(src_file, dst_file, follow_symlinks=False) if dst_file.exists() else None
-            with src_file.open("rb") as sf, dst_file.open("wb") as df:
-                while True:
-                    chunk = sf.read(BACKUP_COPY_CHUNK_SIZE)
-                    if not chunk:
-                        break
-                    df.write(chunk)
-                    copied_bytes += len(chunk)
-                    update_backup_progress(copied_bytes, total_bytes)
-            try:
-                shutil.copystat(src_file, dst_file, follow_symlinks=False)
-            except Exception:
-                pass
-    update_backup_progress(total_bytes, total_bytes)
-
-
-def run_project_backup(task_id: str, project_name: str, source_dir: Path, target_dir: Path):
-    try:
-        total_bytes = calculate_directory_size(source_dir)
-        with backup_lock:
-            BACKUP_TASK["total_bytes"] = total_bytes
-            BACKUP_TASK["message"] = f"Backing up {project_name}"
-
-        if target_dir.exists():
-            raise FileExistsError(f"Backup target already exists: {target_dir}")
-
-        target_dir.parent.mkdir(parents=True, exist_ok=True)
-        copy_project_with_progress(source_dir, target_dir, total_bytes)
-
-        with backup_lock:
-            if BACKUP_TASK.get("id") == task_id:
-                BACKUP_TASK["status"] = "success"
-                BACKUP_TASK["progress"] = 100.0
-                BACKUP_TASK["eta_sec"] = 0
-                BACKUP_TASK["ended_at"] = time.time()
-                BACKUP_TASK["message"] = f"Backup completed: {target_dir}"
-    except Exception as e:
-        try:
-            if target_dir.exists():
-                shutil.rmtree(target_dir, ignore_errors=True)
-        except Exception:
-            pass
-        with backup_lock:
-            if BACKUP_TASK.get("id") == task_id:
-                BACKUP_TASK["status"] = "failed"
-                BACKUP_TASK["ended_at"] = time.time()
-                BACKUP_TASK["message"] = str(e)
-
-
-def start_project_backup(project_name: str):
-    project_path = resolve_project_path(project_name)
-    if not project_path or not project_path.exists():
-        return False, "Không tìm thấy project", None
-
-    try:
-        target_path = safe_backup_target_path(project_name)
-    except Exception as e:
-        return False, str(e), None
-
-    with backup_lock:
-        if BACKUP_TASK.get("status") == "running":
-            return False, "Đang có backup khác chạy", None
-        reset_backup_task_locked()
-        task_id = f"backup-{int(time.time() * 1000)}"
-        BACKUP_TASK.update({
-            "id": task_id,
-            "project": project_name,
-            "target_path": str(target_path),
-            "status": "running",
-            "progress": 0.0,
-            "eta_sec": None,
-            "copied_bytes": 0,
-            "total_bytes": 0,
-            "started_at": time.time(),
-            "ended_at": 0.0,
-            "message": f"Starting backup to {target_path}",
-        })
-
-    threading.Thread(
-        target=run_project_backup,
-        args=(task_id, project_name, project_path, target_path),
-        daemon=True
-    ).start()
     return True, f"Đã bắt đầu backup {project_name}", task_id
 
 
@@ -817,53 +504,43 @@ def safe_download_part(text: str) -> str:
     return text.strip("._") or "file"
 
 
-def build_notifier():
-    token = str(TELEGRAM_BOT_TOKEN).strip()
-    chat_id = str(TELEGRAM_CHAT_ID).strip()
-
-    if not token or not chat_id or token == "YOUR_BOT_TOKEN" or chat_id == "YOUR_CHAT_ID":
-        return None
-
-    try:
-        return TelegramNotifier(token=token, chat_id=chat_id)
-    except Exception:
-        return None
+def _zip_datetime_from_ts(ts: float):
+    dt = datetime.fromtimestamp(max(float(ts), 315532800.0))
+    return (dt.year, dt.month, dt.day, dt.hour, dt.minute, dt.second)
 
 
-def is_notify_enabled():
-    with state_lock:
-        return bool(NOTIFY_STATE.get("enabled", False))
+def _windows_filetime_from_ts(ts: float) -> int:
+    return int((float(ts) + 11644473600) * 10_000_000)
 
 
-def send_telegram_notification_async(text: str):
-    notifier = build_notifier()
-    if not notifier:
-        return False
-
-    def _worker():
-        try:
-            notifier.send_message(text)
-        except Exception:
-            pass
-
-    threading.Thread(target=_worker, daemon=True).start()
-    return True
+def _ntfs_time_extra(st) -> bytes:
+    # NTFS ZIP extra field stores mtime/atime/ctime for extractors that support it.
+    mtime = _windows_filetime_from_ts(st.st_mtime)
+    atime = _windows_filetime_from_ts(st.st_atime)
+    ctime = _windows_filetime_from_ts(st.st_ctime)
+    payload = struct.pack("<LHHQQQ", 0, 0x0001, 24, mtime, atime, ctime)
+    return struct.pack("<HH", 0x000A, len(payload)) + payload
 
 
-def notify_train_finished(project_name: str, status: str, returncode=None):
-    if not is_notify_enabled():
-        return
+def write_file_to_zip_preserve_times(zf: zipfile.ZipFile, file_path: Path, arcname: str):
+    st = file_path.stat()
+    zi = zipfile.ZipInfo(filename=str(arcname).replace("\\", "/"))
+    zi.date_time = _zip_datetime_from_ts(st.st_mtime)
+    zi.compress_type = zipfile.ZIP_DEFLATED
+    zi.create_system = 0
+    zi.extra = _ntfs_time_extra(st)
 
-    icon = "âœ…" if status == "success" else "âŒ"
-    text = (
-        f"{icon} TRAIN FINISHED\n\n"
-        f"Project: {project_name}\n"
-        f"Status: {status.upper()}\n"
-        f"Return code: {returncode}\n"
-        f"Time: {now_str()}"
-    )
-    send_telegram_notification_async(text)
+    with open(file_path, "rb") as src:
+        with zf.open(zi, "w") as dst:
+            shutil.copyfileobj(src, dst, length=1024 * 1024)
 
+
+def safe_project_name_part(text: str) -> str:
+    text = str(text).strip()
+    text = re.sub(r'[\\/:*?"<>|]+', "_", text)
+    text = re.sub(r"\s{2,}", " ", text)
+    text = re.sub(r"_+", "_", text)
+    return text.strip(" ._") or "project"
 
 def ensure_project_state(project_name):
     if project_name not in STATE["projects"]:
@@ -1129,11 +806,38 @@ def queue_project(project_name):
         STATE["queue"].append(project_name)
         p["status"] = "queued"
         p["progress"] = 0.0
+        sync_queue_session_file_locked()
         bump_state_version_locked()
 
     train_queue.put(project_name)
     start_worker_if_needed()
     return True, f"Added {project_name} to queue"
+
+
+def is_train_slot_busy_locked(exclude_project: str = "") -> bool:
+    exclude_project = str(exclude_project or "").strip()
+
+    current_name = str(STATE.get("current") or "").strip()
+    if current_name and current_name != exclude_project:
+        return True
+
+    control_name = str(CURRENT_TRAIN_CONTROL.get("project") or "").strip()
+    if control_name and control_name != exclude_project:
+        return True
+
+    for name, info in STATE["projects"].items():
+        if str(name or "").strip() == exclude_project:
+            continue
+        if str(info.get("status") or "").strip() == "running":
+            return True
+
+    monitor_status = MONITOR_CACHE.get("status") or {}
+    if bool(monitor_status.get("is_training", False)):
+        monitor_project_name = str(MONITOR_CACHE.get("matched_project_name") or monitor_status.get("project_name") or "").strip()
+        if not monitor_project_name or monitor_project_name != exclude_project:
+            return True
+
+    return False
 
 
 def queue_projects(project_names):
@@ -1198,6 +902,7 @@ def stop_pending_queue():
                 p["progress"] = 0.0
 
         cleared = queued_names
+        sync_queue_session_file_locked()
         bump_state_version_locked()
 
     while True:
@@ -1238,14 +943,37 @@ def count_images_in_dir(folder: Path) -> int:
 
 
 def resolve_project_path(project_name: str):
+    project_name = str(project_name or "").strip()
+    if not project_name:
+        return None
+
     with state_lock:
         info = STATE["projects"].get(project_name)
         if not info or not info.get("path"):
-            return None
+            info = None
         try:
-            return Path(info["path"]).resolve()
+            if info:
+                resolved = Path(info["path"]).resolve()
+                if resolved.exists() and resolved.is_dir() and is_path_inside(resolved, ROOT_DIR):
+                    return resolved
         except Exception:
-            return None
+            pass
+
+    direct_path = (ROOT_DIR / project_name).resolve()
+    if direct_path.exists() and direct_path.is_dir() and is_path_inside(direct_path, ROOT_DIR):
+        return direct_path
+
+    try:
+        project_name_lower = project_name.casefold()
+        for child in ROOT_DIR.iterdir():
+            if not child.is_dir():
+                continue
+            if child.name.casefold() == project_name_lower and is_path_inside(child.resolve(), ROOT_DIR):
+                return child.resolve()
+    except Exception:
+        pass
+
+    return None
 
 
 def find_project_image_dir(project_path: Path):
@@ -1350,9 +1078,9 @@ def resolve_label_file_for_image(project_name: str, rel_path: str, create_missin
             return c, None
 
     if not create_missing:
-        return candidates[-1], None
+        return candidates[0], None
 
-    target = candidates[-1]
+    target = candidates[0]
     try:
         target.parent.mkdir(parents=True, exist_ok=True)
     except Exception:
@@ -1384,6 +1112,378 @@ def extract_class_ids_from_label_file(label_file: Path):
 
     # unique + sorted
     return sorted(set(ids))
+
+
+def count_boxes_in_label_file(label_file: Path):
+    if not label_file or not label_file.exists() or not label_file.is_file():
+        return 0
+    try:
+        raw = label_file.read_text(encoding="utf-8")
+    except Exception:
+        return 0
+
+    count = 0
+    for line in raw.replace("\r\n", "\n").split("\n"):
+        s = line.strip()
+        if not s:
+            continue
+        parts = s.split()
+        if len(parts) < 5:
+            continue
+        try:
+            float(parts[0]); float(parts[1]); float(parts[2]); float(parts[3]); float(parts[4])
+        except Exception:
+            continue
+        count += 1
+    return count
+
+
+def parse_yolo_label_rows(text: str):
+    rows = []
+    for line_index, line in enumerate(str(text or "").replace("\r\n", "\n").split("\n")):
+        s = line.strip()
+        if not s:
+            continue
+        parts = s.split()
+        if len(parts) < 5:
+            continue
+        try:
+            cls = int(float(parts[0]))
+            cx = float(parts[1])
+            cy = float(parts[2])
+            w = float(parts[3])
+            h = float(parts[4])
+        except Exception:
+            continue
+        rows.append({
+            "line_index": line_index,
+            "cls": cls,
+            "cx": cx,
+            "cy": cy,
+            "w": w,
+            "h": h,
+        })
+    return rows
+
+
+def normalize_bbox_class_name(name: str):
+    raw = str(name or "").strip()
+    if not raw:
+        return ""
+    cleaned = re.sub(r"(?:[_\-\s]+)?(?:OK|NG)$", "", raw, flags=re.IGNORECASE).strip(" _-")
+    return cleaned or raw
+
+
+def invalidate_project_bbox_analysis(project_name: str):
+    key = str(project_name or "").strip()
+    if not key:
+        return
+    with bbox_analysis_cache_lock:
+        BBOX_ANALYSIS_CACHE.pop(key, None)
+
+
+def build_project_bbox_analysis(project_name: str):
+    project_path = resolve_project_path(project_name)
+    if not project_path or not project_path.exists():
+        return {
+            "project": project_name,
+            "class_stats": {},
+            "images": {},
+        }
+
+    _, rel_images = list_project_images(project_path, limit=0)
+    class_names, _ = load_project_classes(project_path)
+    image_rows = {}
+    group_values = {}
+
+    for rel in rel_images:
+        label_file, _ = resolve_label_file_for_image(project_name, rel, create_missing=False)
+        text = ""
+        if label_file and label_file.exists() and label_file.is_file():
+            try:
+                text = label_file.read_text(encoding="utf-8")
+            except Exception:
+                text = ""
+        rows = parse_yolo_label_rows(text)
+        for row in rows:
+            cls = int(row.get("cls", -1))
+            cls_name = class_names[cls] if 0 <= cls < len(class_names) else f"class_{cls}"
+            group_name = normalize_bbox_class_name(cls_name)
+            row["cls_name"] = cls_name
+            row["group_name"] = group_name
+        image_rows[rel] = rows
+        for row in rows:
+            group_name = str(row.get("group_name", "") or "")
+            bucket = group_values.setdefault(group_name, {"cx": [], "cy": [], "w": [], "h": []})
+            bucket["cx"].append(float(row["cx"]))
+            bucket["cy"].append(float(row["cy"]))
+            bucket["w"].append(float(row["w"]))
+            bucket["h"].append(float(row["h"]))
+
+    group_stats = {}
+    for group_name, metrics in group_values.items():
+        stat_row = {"count": len(metrics["cx"])}
+        for metric_name in ("cx", "cy", "w", "h"):
+            vals = metrics[metric_name]
+            if not vals:
+                stat_row[f"{metric_name}_mean"] = 0.0
+                stat_row[f"{metric_name}_std"] = 0.0
+                continue
+            mean = sum(vals) / len(vals)
+            variance = sum((v - mean) ** 2 for v in vals) / len(vals)
+            stat_row[f"{metric_name}_mean"] = mean
+            stat_row[f"{metric_name}_std"] = math.sqrt(max(0.0, variance))
+        group_stats[group_name] = stat_row
+
+    images = {}
+    for rel, rows in image_rows.items():
+        images[rel] = {
+            "bbox_count": len(rows),
+            "rows": rows,
+        }
+
+    return {
+        "project": project_name,
+        "class_names": class_names,
+        "group_stats": group_stats,
+        "images": images,
+    }
+
+
+def evaluate_bbox_image_anomalies(group_stats: dict, image_info: dict, sensitivity: str = "medium"):
+    rows = list((image_info or {}).get("rows") or [])
+    sensitivity_key = str(sensitivity or "medium").strip().lower()
+    sensitivity_map = {
+        "low": {"sigma_mult": 4.2, "floor_mult": 1.35},
+        "medium": {"sigma_mult": 3.0, "floor_mult": 1.0},
+        "high": {"sigma_mult": 2.2, "floor_mult": 0.78},
+    }
+    cfg = sensitivity_map.get(sensitivity_key, sensitivity_map["medium"])
+    metric_floors = {
+        "cx": 0.12 * cfg["floor_mult"],
+        "cy": 0.12 * cfg["floor_mult"],
+        "w": 0.10 * cfg["floor_mult"],
+        "h": 0.10 * cfg["floor_mult"],
+    }
+
+    anomaly_items = []
+    for idx, row in enumerate(rows):
+        cls = int(row.get("cls", -1))
+        cls_name = str(row.get("cls_name", "") or f"class_{cls}")
+        group_name = str(row.get("group_name", "") or normalize_bbox_class_name(cls_name))
+        stats = group_stats.get(group_name) or {}
+        if int(stats.get("count", 0) or 0) < 8:
+            continue
+
+        reasons = []
+        for metric_name, floor in metric_floors.items():
+            mean = float(stats.get(f"{metric_name}_mean", 0.0) or 0.0)
+            std = float(stats.get(f"{metric_name}_std", 0.0) or 0.0)
+            value = float(row.get(metric_name, 0.0) or 0.0)
+            tolerance = max(std * float(cfg["sigma_mult"]), floor)
+            if abs(value - mean) > tolerance:
+                reasons.append({
+                    "metric": metric_name,
+                    "value": value,
+                    "mean": mean,
+                    "std": std,
+                    "tolerance": tolerance,
+                })
+
+        own_score = 0.0
+        best_group = group_name
+        best_score = float("inf")
+        for candidate_group, candidate_stats in (group_stats or {}).items():
+            if int(candidate_stats.get("count", 0) or 0) < 8:
+                continue
+            score = 0.0
+            for metric_name, floor in metric_floors.items():
+                mean = float(candidate_stats.get(f"{metric_name}_mean", 0.0) or 0.0)
+                std = float(candidate_stats.get(f"{metric_name}_std", 0.0) or 0.0)
+                value = float(row.get(metric_name, 0.0) or 0.0)
+                tolerance = max(std * float(cfg["sigma_mult"]), floor)
+                score += abs(value - mean) / max(tolerance, 1e-6)
+            if candidate_group == group_name:
+                own_score = score
+            if score < best_score:
+                best_score = score
+                best_group = candidate_group
+
+        if best_group != group_name and (own_score - best_score) >= 1.0 and best_score <= max(2.2, own_score * 0.75):
+            reasons.append({
+                "metric": "name",
+                "value": cls_name,
+                "group_name": group_name,
+                "best_group": best_group,
+                "own_score": own_score,
+                "best_score": best_score,
+            })
+
+        if reasons:
+            anomaly_items.append({
+                "box_index": idx,
+                "line_index": int(row.get("line_index", idx)),
+                "cls": cls,
+                "cls_name": cls_name,
+                "group_name": group_name,
+                "reasons": reasons,
+            })
+
+    return {
+        "bbox_count": len(rows),
+        "anomaly_count": len(anomaly_items),
+        "has_anomaly": bool(anomaly_items),
+        "anomaly_box_indices": [int(x["box_index"]) for x in anomaly_items],
+        "anomaly_items": anomaly_items,
+        "sensitivity": sensitivity_key,
+    }
+
+
+def get_project_bbox_analysis(project_name: str):
+    key = str(project_name or "").strip()
+    if not key:
+        return {"project": "", "class_stats": {}, "images": {}}
+    with bbox_analysis_cache_lock:
+        cached = BBOX_ANALYSIS_CACHE.get(key)
+        if cached is not None:
+            return cached
+    analysis = build_project_bbox_analysis(key)
+    with bbox_analysis_cache_lock:
+        BBOX_ANALYSIS_CACHE[key] = analysis
+    return analysis
+
+
+def resolve_source_image_rel_from_validation_sample(project_path: Path, sample_row: dict):
+    image_dir = find_project_image_dir(project_path)
+    if not image_dir:
+        return None
+
+    valid_image_root = project_path / "valid" / "images"
+    rel_candidates = []
+
+    val_rel = str(sample_row.get("val_image_rel_path", "") or "").strip().replace("\\", "/")
+    if val_rel:
+        rel_candidates.append(val_rel)
+
+    image_name = str(sample_row.get("image_name", "") or "").strip()
+    if image_name:
+        rel_candidates.append(image_name)
+
+    seen = set()
+    for rel in rel_candidates:
+        rel = str(rel or "").strip().replace("\\", "/")
+        if not rel or rel in seen:
+            continue
+        seen.add(rel)
+        source_candidate = (image_dir / rel).resolve()
+        if is_path_inside(source_candidate, image_dir) and source_candidate.exists() and source_candidate.is_file():
+            try:
+                return source_candidate.relative_to(image_dir).as_posix()
+            except Exception:
+                return rel
+
+        valid_candidate = (valid_image_root / rel).resolve()
+        if is_path_inside(valid_candidate, valid_image_root) and valid_candidate.exists() and valid_candidate.is_file():
+            source_from_valid = (image_dir / rel).resolve()
+            if is_path_inside(source_from_valid, image_dir) and source_from_valid.exists() and source_from_valid.is_file():
+                try:
+                    return source_from_valid.relative_to(image_dir).as_posix()
+                except Exception:
+                    return rel
+
+    if image_name:
+        matches = []
+        try:
+            for f in image_dir.rglob("*"):
+                if f.is_file() and f.name == image_name and f.suffix.lower() in IMAGE_EXTS:
+                    matches.append(f)
+        except Exception:
+            matches = []
+        if len(matches) == 1:
+            try:
+                return matches[0].relative_to(image_dir).as_posix()
+            except Exception:
+                return image_name
+
+    return None
+
+
+def promote_validation_sample_to_train(project_name: str, source_rel: str, valid_rel: str | None = None, text: str | None = None):
+    project_path = resolve_project_path(project_name)
+    if not project_path or not project_path.exists():
+        return False, "Không tìm thấy project", None
+
+    source_image_file, err = resolve_project_image_file(project_name, source_rel)
+    if err or not source_image_file:
+        return False, "Không tìm thấy ảnh nguồn trong image", None
+
+    label_file, err = resolve_label_file_for_image(project_name, source_rel, create_missing=True)
+    if err or not label_file:
+        return False, err or "Không tạo được label nguồn", None
+
+    normalized_text = None if text is None else str(text).replace("\r\n", "\n")
+    if normalized_text is not None:
+        try:
+            label_file.write_text(normalized_text, encoding="utf-8")
+        except Exception:
+            return False, "Không lưu được label nguồn", None
+
+    rel_for_dataset = str(valid_rel or source_rel or "").strip().replace("\\", "/")
+    if not rel_for_dataset:
+        return False, "Thiếu đường dẫn valid/source", None
+
+    rel_path = Path(rel_for_dataset)
+    train_image_root = (project_path / "train" / "images").resolve()
+    train_label_root = (project_path / "train" / "labels").resolve()
+    valid_image_root = (project_path / "valid" / "images").resolve()
+    valid_label_root = (project_path / "valid" / "labels").resolve()
+
+    train_image_file = (train_image_root / rel_path).resolve()
+    train_label_file = (train_label_root / rel_path).with_suffix(".txt").resolve()
+    valid_image_file = (valid_image_root / rel_path).resolve()
+    valid_label_file = (valid_label_root / rel_path).with_suffix(".txt").resolve()
+
+    for candidate, root in (
+        (train_image_file, train_image_root),
+        (train_label_file, train_label_root),
+        (valid_image_file, valid_image_root),
+        (valid_label_file, valid_label_root),
+    ):
+        if not is_path_inside(candidate, root):
+            return False, "Đường dẫn dataset không hợp lệ", None
+
+    try:
+        train_image_file.parent.mkdir(parents=True, exist_ok=True)
+        train_label_file.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source_image_file, train_image_file)
+        shutil.copy2(label_file, train_label_file)
+    except Exception as e:
+        return False, f"Không copy được sang train: {e}", None
+
+    removed_valid_image = False
+    removed_valid_label = False
+    try:
+        if valid_image_file.exists() and valid_image_file.is_file():
+            valid_image_file.unlink()
+            removed_valid_image = True
+    except Exception as e:
+        return False, f"Không xóa được ảnh khỏi valid: {e}", None
+
+    try:
+        if valid_label_file.exists() and valid_label_file.is_file():
+            valid_label_file.unlink()
+            removed_valid_label = True
+    except Exception as e:
+        return False, f"Không xóa được label khỏi valid: {e}", None
+
+    return True, "Đã relabel và chuyển ảnh sang train", {
+        "source_rel": str(source_rel),
+        "valid_rel": rel_for_dataset,
+        "train_image": str(train_image_file),
+        "train_label": str(train_label_file),
+        "removed_valid_image": removed_valid_image,
+        "removed_valid_label": removed_valid_label,
+    }
 
 
 def load_project_classes(project_path: Path):
@@ -1534,14 +1634,26 @@ def split_dataset_rows_by_class(image_rows: list, clean_cfg: dict):
     return buckets
 
 
-def create_dataset_for_project(project_name: str, cfg: dict, split_mode: str = "count"):
+def create_dataset_for_project(project_name: str, cfg: dict, split_mode: str = "count", progress_cb=None):
     ok, err, clean_cfg = validate_dataset_config(cfg)
     if not ok:
         return False, err, None
 
+    if callable(progress_cb):
+        try:
+            progress_cb(4.0, "Validating dataset config", project_name)
+        except Exception:
+            pass
+
     ok, err, project_path, image_rows = collect_dataset_source_rows(project_name)
     if not ok:
         return False, err, None
+
+    if callable(progress_cb):
+        try:
+            progress_cb(12.0, f"Collected {len(image_rows)} source image/label pairs", project_name)
+        except Exception:
+            pass
 
     split_mode = str(split_mode or "count").strip().lower()
     if split_mode == "class":
@@ -1549,7 +1661,23 @@ def create_dataset_for_project(project_name: str, cfg: dict, split_mode: str = "
     else:
         buckets = split_dataset_rows_by_count(image_rows, clean_cfg)
 
-    clear_project_dataset_dirs(project_path)
+    if callable(progress_cb):
+        try:
+            progress_cb(18.0, "Clearing old dataset folders", project_name)
+        except Exception:
+            pass
+
+    def _clear_progress(done, total, folder_name, stage):
+        if not callable(progress_cb):
+            return
+        pct = 18.0 + ((float(done or 0) / max(1.0, float(total or 1))) * 10.0)
+        label = "Removing" if stage != "done" else "Removed"
+        progress_cb(pct, f"{label} dataset folder: {folder_name}", project_name)
+
+    clear_project_dataset_dirs(project_path, progress_cb=_clear_progress)
+
+    total_copy = sum(len(rows) for rows in buckets.values())
+    copied = 0
 
     created_counts = {}
     for split_name, rows in buckets.items():
@@ -1572,7 +1700,20 @@ def create_dataset_for_project(project_name: str, cfg: dict, split_mode: str = "
             shutil.copy2(row["image_file"], img_dst)
             shutil.copy2(row["label_file"], lbl_dst)
             count += 1
+            copied += 1
+            if callable(progress_cb):
+                try:
+                    pct = 30.0 + ((float(copied) / max(1.0, float(total_copy or 1))) * 58.0)
+                    progress_cb(pct, f"Copying {split_name}: {copied}/{total_copy}", rel_path.as_posix())
+                except Exception:
+                    pass
         created_counts[split_name] = count
+
+    if callable(progress_cb):
+        try:
+            progress_cb(91.0, "Writing data.yaml", project_name)
+        except Exception:
+            pass
 
     classes, _ = load_project_classes(project_path)
     data_yaml = {
@@ -1592,6 +1733,12 @@ def create_dataset_for_project(project_name: str, cfg: dict, split_mode: str = "
     except Exception as e:
         return False, f"Không ghi được data.yaml: {e}", None
 
+    if callable(progress_cb):
+        try:
+            progress_cb(96.0, "Saving dataset config", project_name)
+        except Exception:
+            pass
+
     ok, err, saved_cfg = save_dataset_config(project_path, clean_cfg)
     if not ok:
         return False, err, None
@@ -1604,10 +1751,16 @@ def create_dataset_for_project(project_name: str, cfg: dict, split_mode: str = "
     }
 
 
-def merge_train_valid_to_train(project_name: str):
+def merge_train_valid_to_train(project_name: str, progress_cb=None):
     project_path = resolve_project_path(project_name)
     if not project_path or not project_path.exists():
         return False, "Không tìm thấy project", None
+
+    if callable(progress_cb):
+        try:
+            progress_cb(6.0, "Scanning train/valid folders", project_name)
+        except Exception:
+            pass
 
     source_rows = []
     for split_name in ("train", "valid"):
@@ -1631,8 +1784,19 @@ def merge_train_valid_to_train(project_name: str):
     if not source_rows:
         return False, "Không có dữ liệu train/valid để gộp", None
 
+    if callable(progress_cb):
+        try:
+            progress_cb(18.0, f"Collected {len(source_rows)} files to merge", project_name)
+        except Exception:
+            pass
+
     train_root = project_path / "train"
     if train_root.exists() and train_root.is_dir():
+        if callable(progress_cb):
+            try:
+                progress_cb(26.0, "Removing old train folder", str(train_root))
+            except Exception:
+                pass
         shutil.rmtree(train_root)
 
     img_dst_root = train_root / "images"
@@ -1641,6 +1805,7 @@ def merge_train_valid_to_train(project_name: str):
     lbl_dst_root.mkdir(parents=True, exist_ok=True)
 
     copied = 0
+    total_copy = len(source_rows)
     for row in source_rows:
         rel_path = Path(row["rel"])
         img_dst = img_dst_root / rel_path
@@ -1650,6 +1815,12 @@ def merge_train_valid_to_train(project_name: str):
         shutil.copy2(row["image_file"], img_dst)
         shutil.copy2(row["label_file"], lbl_dst)
         copied += 1
+        if callable(progress_cb):
+            try:
+                pct = 34.0 + ((float(copied) / max(1.0, float(total_copy or 1))) * 62.0)
+                progress_cb(pct, f"Merging train data: {copied}/{total_copy}", rel_path.as_posix())
+            except Exception:
+                pass
 
     return True, "Đã gộp train + valid vào train", {
         "counts": {
@@ -1660,14 +1831,6 @@ def merge_train_valid_to_train(project_name: str):
     }
 
 
-def is_path_inside(child: Path, parent: Path) -> bool:
-    try:
-        child.resolve().relative_to(parent.resolve())
-        return True
-    except Exception:
-        return False
-
-
 def find_output_dir(project_path: Path):
     for folder_name in ("Output", "output"):
         p = project_path / folder_name
@@ -1676,127 +1839,8 @@ def find_output_dir(project_path: Path):
     return None
 
 
-def resolve_uploaded_project_dir(extract_root: Path):
-    try:
-        items = list(extract_root.iterdir())
-    except Exception:
-        return None, "cannot_scan_extracted_content"
-
-    if not items:
-        return None, "project_not_found"
-
-    top_level_dirs = [item for item in items if item.is_dir()]
-    top_level_files = [item for item in items if item.is_file()]
-
-    if len(top_level_dirs) == 1 and not top_level_files:
-        return top_level_dirs[0], None
-
-    return extract_root, None
-
-
 def save_uploaded_project_zip(upload_file):
-    if not upload_file:
-        return False, "missing_file", None
-
-    filename = str(upload_file.filename or "").strip()
-    if not filename.lower().endswith(".zip"):
-        return False, "only_zip_supported", None
-
-    with tempfile.TemporaryDirectory(prefix="traincontrol_upload_") as tmp_dir:
-        tmp_dir_path = Path(tmp_dir)
-        zip_path = tmp_dir_path / "upload.zip"
-        extract_root = tmp_dir_path / "extract"
-        extract_root.mkdir(parents=True, exist_ok=True)
-
-        upload_file.save(str(zip_path))
-
-        try:
-            with zipfile.ZipFile(zip_path, "r") as zf:
-                infos = zf.infolist()
-                if not infos:
-                    return False, "zip_empty", None
-
-                for info in infos:
-                    name = str(info.filename or "").replace("\\", "/")
-                    parts = Path(name).parts
-                    if name.startswith("/") or ".." in parts:
-                        return False, "invalid_zip_path", None
-
-                zf.extractall(path=str(extract_root))
-        except zipfile.BadZipFile:
-            return False, "bad_zip_file", None
-        except Exception:
-            return False, "extract_failed", None
-
-        candidate, err = resolve_uploaded_project_dir(extract_root)
-        if err or not candidate:
-            return False, err or "project_not_found", None
-
-        suggested_name = candidate.name
-        if candidate == extract_root:
-            suggested_name = Path(filename).stem
-
-        target_name = safe_download_part(suggested_name)
-        target_dir = ROOT_DIR / target_name
-
-        if target_dir.exists():
-            return False, "project_already_exists", target_name
-
-        try:
-            shutil.copytree(candidate, target_dir)
-        except Exception:
-            return False, "copy_failed", target_name
-
-    return True, "uploaded", target_name
-
-
-def _collect_importable_data_files(extract_root: Path):
-    image_rows = []
-    label_rows = []
-    file_items = []
-
-    for src in extract_root.rglob("*"):
-        if src.is_file():
-            rel = src.relative_to(extract_root)
-            file_items.append((src, rel))
-
-    if not file_items:
-        return image_rows, label_rows
-
-    top_level_parts = {rel.parts[0] for _, rel in file_items if rel.parts}
-    strip_first_part = len(top_level_parts) == 1
-
-    for src, rel in file_items:
-        rel_parts = list(rel.parts)
-        if strip_first_part and len(rel_parts) > 1:
-            rel_parts = rel_parts[1:]
-        elif strip_first_part and len(rel_parts) == 1:
-            rel_parts = rel.parts[:]
-
-        lower_parts = [part.lower() for part in rel_parts]
-        suffix = src.suffix.lower()
-
-        if suffix in IMAGE_EXTS:
-            trimmed_parts = rel_parts[:]
-            if lower_parts and lower_parts[0] in ("data", "dataset", "image", "images"):
-                trimmed_parts = rel_parts[1:]
-            rel_target = Path(*trimmed_parts) if trimmed_parts else Path(src.name)
-            image_rows.append((src, rel_target))
-            continue
-
-        if suffix != ".txt":
-            continue
-
-        trimmed_parts = rel_parts[:]
-        if lower_parts and lower_parts[0] in ("data", "dataset", "labels", "label"):
-            trimmed_parts = rel_parts[1:]
-        elif lower_parts and lower_parts[0] in ("image", "images"):
-            trimmed_parts = rel_parts[1:]
-
-        rel_target = Path(*trimmed_parts) if trimmed_parts else Path(src.stem).with_suffix(".txt")
-        label_rows.append((src, rel_target.with_suffix(".txt")))
-
-    return image_rows, label_rows
+    return dataset_save_uploaded_project_zip(upload_file, BASE_DIR, safe_project_name_part)
 
 
 def import_project_data_zip(project_name: str, upload_file):
@@ -1811,12 +1855,6 @@ def import_project_data_zip(project_name: str, upload_file):
             image_dir.mkdir(parents=True, exist_ok=True)
         except Exception:
             return False, "cannot_create_image_dir", None
-
-    labels_dir = image_dir / "labels"
-    try:
-        labels_dir.mkdir(parents=True, exist_ok=True)
-    except Exception:
-        return False, "cannot_create_label_dir", None
 
     if not upload_file:
         return False, "missing_file", None
@@ -1854,7 +1892,7 @@ def import_project_data_zip(project_name: str, upload_file):
         except Exception:
             return False, "extract_failed", None
 
-        image_rows, label_rows = _collect_importable_data_files(extract_root)
+        image_rows, label_rows = collect_importable_data_files(extract_root, IMAGE_EXTS)
         if not image_rows and not label_rows:
             return False, "no_data_found", None
 
@@ -1870,8 +1908,8 @@ def import_project_data_zip(project_name: str, upload_file):
                 return False, "copy_failed", None
 
         for src, rel_target in label_rows:
-            dst = (labels_dir / rel_target).resolve()
-            if not is_path_inside(dst, labels_dir):
+            dst = (image_dir / rel_target).resolve()
+            if not is_path_inside(dst, image_dir):
                 return False, "invalid_zip_path", None
             try:
                 dst.parent.mkdir(parents=True, exist_ok=True)
@@ -1885,7 +1923,7 @@ def import_project_data_zip(project_name: str, upload_file):
         "images_added": copied_images,
         "labels_added": copied_labels,
         "image_dir": str(image_dir),
-        "labels_dir": str(labels_dir),
+        "labels_dir": str(image_dir),
     }
 
 
@@ -1906,10 +1944,11 @@ def get_output_model_train_weights_info(project_path: Path):
 
     rows = []
     for run_dir in model_train_dirs:
-        for f in run_dir.rglob("*"):
+        weights_dir = run_dir / "weights"
+        if not weights_dir.exists() or not weights_dir.is_dir():
+            continue
+        for f in weights_dir.rglob("*"):
             if f.is_file():
-                if f.suffix.lower() in IMAGE_EXTS:
-                    continue
                 st = f.stat()
                 rows.append({
                     "run_folder": run_dir.name,
@@ -2241,6 +2280,8 @@ def summarize_confusion_analysis(run_dir: Path):
             "total_errors": total_errors,
             "error_rate": error_rate,
             "correct": int(float(row.get("correct", 0) or 0)),
+            "mis_as_other_classes": int(float(row.get("mis_as_other_classes", 0) or 0)),
+            "missed_as_background": int(float(row.get("missed_as_background", 0) or 0)),
         })
     all_error_classes.sort(key=lambda x: (x["error_rate"], x["total_errors"]), reverse=True)
     top_error_classes = all_error_classes[:10]
@@ -2316,8 +2357,12 @@ def summarize_confusion_analysis(run_dir: Path):
             continue
         sample_items.append({
             "image_name": str(row.get("image_name", "") or "").strip(),
+            "val_image_rel_path": str(row.get("val_image_rel_path", "") or "").strip().replace("\\", "/"),
+            "gt_label_rel_path": str(row.get("gt_label_rel_path", "") or "").strip().replace("\\", "/"),
             "sample_rel_path": rel_path,
+            "gt_class_id": str(row.get("gt_class_id", "") or "").strip(),
             "gt_class_name": str(row.get("gt_class_name", "") or "").strip(),
+            "pred_class_id": str(row.get("pred_class_id", "") or "").strip(),
             "pred_class_name": str(row.get("pred_class_name", "") or "").strip(),
             "issue_type": str(row.get("issue_type", "") or "").strip(),
         })
@@ -2331,6 +2376,91 @@ def summarize_confusion_analysis(run_dir: Path):
         "sample_threshold": sample_threshold,
         "sample_items": sample_items,
         "insights": insights,
+    }
+
+
+def build_testing_summary(project_path: Path, run_dir: Path):
+    output_dir = find_output_dir(project_path)
+    if not output_dir:
+        return {"exists": False}
+
+    testing_dir = (run_dir / "ModelTesting").resolve()
+    if not testing_dir.exists() or not testing_dir.is_dir() or not is_path_inside(testing_dir, run_dir):
+        return {"exists": False}
+
+    results_csv = testing_dir / "results.csv"
+    results_info = read_results_csv_preview(results_csv)
+    results_summary = summarize_results_csv(results_csv)
+    confusion_summary = summarize_confusion_analysis(testing_dir)
+
+    sample_items = []
+    sample_rows = list(confusion_summary.get("sample_items") or [])
+    unique_sample_images = set()
+    for row in sample_rows:
+        rel_path = str(row.get("sample_rel_path", "") or "").strip().replace("\\", "/")
+        if not rel_path:
+            continue
+        source_rel = resolve_source_image_rel_from_validation_sample(project_path, row)
+        val_rel = str(row.get("val_image_rel_path", "") or "").strip().replace("\\", "/")
+        if val_rel:
+            unique_sample_images.add(val_rel)
+        sample_items.append({
+            **row,
+            "relative_path": f"{run_dir.name}/ModelTesting/{rel_path}",
+            "source_image_rel": source_rel,
+            "can_label_source": bool(source_rel),
+        })
+    confusion_summary["sample_items"] = sample_items
+
+    counts_csv = testing_dir / "misclassified_counts.csv"
+    count_rows = read_csv_rows(counts_csv, max_rows=2000)
+    total_gt_objects = 0
+    total_correct_objects = 0
+    total_error_objects = 0
+    for row in count_rows:
+        try:
+            total_gt_objects += int(float(row.get("gt_total", 0) or 0))
+            total_correct_objects += int(float(row.get("correct", 0) or 0))
+            total_error_objects += int(float(row.get("total_errors", 0) or 0))
+        except Exception:
+            continue
+
+    export_files = []
+    for name in [
+        "results.csv",
+        "predictions_val.csv",
+        "misclassified_counts.csv",
+        "misclassified_pairs.csv",
+        "misclassified_samples.csv",
+        "per_class_metrics.csv",
+        "metrics_summary.json",
+    ]:
+        file_path = testing_dir / name
+        if not file_path.exists() or not file_path.is_file():
+            continue
+        export_files.append({
+            "name": name,
+            "relative_path": file_path.relative_to(output_dir).as_posix(),
+        })
+
+    return {
+        "exists": bool(results_info.get("exists") or confusion_summary.get("exists") or export_files),
+        "run_folder": run_dir.name,
+        "testing_folder": "ModelTesting",
+        "results_csv": {
+            "relative_path": results_csv.relative_to(output_dir).as_posix() if results_csv.exists() else None,
+            "summary": results_summary,
+            **results_info,
+        },
+        "confusion_analysis": confusion_summary,
+        "export_files": export_files,
+        "summary_counts": {
+            "valid_sample_images": len(unique_sample_images),
+            "misclassified_sample_images": len({str(x.get("sample_rel_path", "") or "") for x in sample_rows if str(x.get("sample_rel_path", "") or "").strip()}),
+            "total_gt_objects": total_gt_objects,
+            "total_correct_objects": total_correct_objects,
+            "total_error_objects": total_error_objects,
+        },
     }
 
 
@@ -2367,14 +2497,18 @@ def get_output_model_train_runs_info(project_path: Path):
         results_info = read_results_csv_preview(results_csv)
         results_summary = summarize_results_csv(results_csv)
         confusion_summary = summarize_confusion_analysis(run_dir)
+        msa_testing = build_msa_testing_summary(project_path, run_dir)
         sample_items = []
         for row in list(confusion_summary.get("sample_items") or []):
             rel_path = str(row.get("sample_rel_path", "") or "").strip().replace("\\", "/")
             if not rel_path:
                 continue
+            source_rel = resolve_source_image_rel_from_validation_sample(project_path, row)
             sample_items.append({
                 **row,
                 "relative_path": f"{run_dir.name}/{rel_path}",
+                "source_image_rel": source_rel,
+                "can_label_source": bool(source_rel),
             })
         confusion_summary["sample_items"] = sample_items
         runs.append({
@@ -2382,6 +2516,8 @@ def get_output_model_train_runs_info(project_path: Path):
             "image_files": image_items,
             "image_count": len(image_items),
             "confusion_analysis": confusion_summary,
+            "model_testing": build_testing_summary(project_path, run_dir),
+            "msa_testing": msa_testing,
             "results_csv": {
                 "relative_path": results_csv.relative_to(output_dir).as_posix() if results_csv.exists() else None,
                 "summary": results_summary,
@@ -2491,6 +2627,117 @@ def _read_run_args(run_dir: Path):
     return defaults
 
 
+def build_revalidate_status_payload():
+    with revalidate_task_lock:
+        return {
+            "ok": True,
+            **dict(REVALIDATE_TASK),
+        }
+
+
+def build_model_test_status_payload():
+    with model_test_task_lock:
+        return {
+            "ok": True,
+            **dict(MODEL_TEST_TASK),
+        }
+
+
+def build_project_fs_task_status_payload():
+    with project_fs_task_lock:
+        return {
+            "ok": True,
+            **dict(PROJECT_FS_TASK),
+        }
+
+
+def build_dataset_task_status_payload():
+    with dataset_task_lock:
+        return {
+            "ok": True,
+            **dict(DATASET_TASK),
+        }
+
+
+def _set_revalidate_task_locked(**kwargs):
+    REVALIDATE_TASK.update(kwargs)
+
+
+def _set_model_test_task_locked(**kwargs):
+    MODEL_TEST_TASK.update(kwargs)
+
+
+def _set_project_fs_task_locked(**kwargs):
+    PROJECT_FS_TASK.update(kwargs)
+
+
+def _set_dataset_task_locked(**kwargs):
+    DATASET_TASK.update(kwargs)
+
+
+def _run_revalidate_task(task_id: str, project_name: str, run_folder: str):
+    with revalidate_task_lock:
+        _set_revalidate_task_locked(
+            progress=8.0,
+            message="Preparing re-validation",
+            detail=f"{project_name} | {run_folder}",
+        )
+
+    ok, message, payload = revalidate_run(project_name, run_folder)
+
+    with revalidate_task_lock:
+        if REVALIDATE_TASK.get("id") != task_id:
+            return
+        _set_revalidate_task_locked(
+            status="success" if ok else "failed",
+            progress=100.0 if ok else max(1.0, float(REVALIDATE_TASK.get("progress") or 0.0)),
+            message=message,
+            detail=f"{project_name} | {run_folder}",
+            ended_at=time.time(),
+            result=payload if ok else None,
+        )
+
+
+def start_revalidate_task(project_name: str, run_folder: str):
+    with revalidate_task_lock:
+        if REVALIDATE_TASK.get("status") == "running":
+            same_task = (
+                str(REVALIDATE_TASK.get("project") or "") == str(project_name or "")
+                and str(REVALIDATE_TASK.get("run_folder") or "") == str(run_folder or "")
+            )
+            if same_task:
+                return True, "Re-validation is already running", {
+                    "task_id": REVALIDATE_TASK.get("id"),
+                    "status": REVALIDATE_TASK.get("status"),
+                }
+            return False, "Another re-validation is already running", None
+
+        task_id = f"revalidate-{int(time.time() * 1000)}"
+        _set_revalidate_task_locked(
+            id=task_id,
+            project=project_name,
+            run_folder=run_folder,
+            status="running",
+            progress=3.0,
+            message="Starting re-validation",
+            detail=f"{project_name} | {run_folder}",
+            started_at=time.time(),
+            ended_at=0.0,
+            result=None,
+        )
+
+    thread = threading.Thread(
+        target=_run_revalidate_task,
+        args=(task_id, project_name, run_folder),
+        daemon=True,
+    )
+    thread.start()
+    return True, "Re-validation started", {
+        "task_id": task_id,
+        "status": "running",
+    }
+
+
 def revalidate_run(project_name: str, run_folder: str):
     run_dir, err = resolve_run_dir(project_name, run_folder)
     if err or not run_dir:
@@ -2512,8 +2759,22 @@ def revalidate_run(project_name: str, run_folder: str):
 
     args_info = _read_run_args(run_dir)
     try:
+        with revalidate_task_lock:
+            if REVALIDATE_TASK.get("status") == "running":
+                _set_revalidate_task_locked(
+                    progress=15.0,
+                    message="Loading validation module",
+                    detail=f"{project_name} | {run_folder}",
+                )
         module = load_train_module()
         append_log(project_name, f"[{now_str()}] REVALIDATE START: {run_folder}")
+        with revalidate_task_lock:
+            if REVALIDATE_TASK.get("status") == "running":
+                _set_revalidate_task_locked(
+                    progress=35.0,
+                    message="Running validation export",
+                    detail=f"{project_name} | {run_folder}",
+                )
         info = module.validate_and_export(
             weights=str(weights_path),
             data_yaml=str(data_yaml),
@@ -2523,6 +2784,13 @@ def revalidate_run(project_name: str, run_folder: str):
             conf=0.50,
             output_dir=str(run_dir),
         )
+        with revalidate_task_lock:
+            if REVALIDATE_TASK.get("status") == "running":
+                _set_revalidate_task_locked(
+                    progress=92.0,
+                    message="Refreshing artifacts",
+                    detail=f"{project_name} | {run_folder}",
+                )
         append_log(project_name, f"[{now_str()}] REVALIDATE DONE: {run_folder}")
         return True, f"Re-validated {run_folder}", {
             "run_folder": run_folder,
@@ -2532,6 +2800,778 @@ def revalidate_run(project_name: str, run_folder: str):
     except Exception as e:
         append_log(project_name, f"[{now_str()}] REVALIDATE FAILED: {run_folder}: {e}")
         return False, f"Re-validate failed: {e}", None
+
+
+def get_model_testing_dir(project_name: str, run_folder: str):
+    run_dir, err = resolve_run_dir(project_name, run_folder)
+    if err or not run_dir:
+        return None, err or "run_not_found"
+    testing_dir = (run_dir / "ModelTesting").resolve()
+    if not is_path_inside(testing_dir, run_dir):
+        return None, "invalid_testing_dir"
+    return testing_dir, None
+
+
+def run_model_testing(project_name: str, run_folder: str):
+    run_dir, err = resolve_run_dir(project_name, run_folder)
+    if err or not run_dir:
+        return False, "Run folder not found", None
+
+    project_path = resolve_project_path(project_name)
+    if not project_path or not project_path.exists():
+        return False, "Project not found", None
+
+    data_yaml = find_project_data_yaml(project_path)
+    if data_yaml is None:
+        return False, "Missing data.yaml in project", None
+
+    best_path = run_dir / "weights" / "best.pt"
+    last_path = run_dir / "weights" / "last.pt"
+    weights_path = best_path if best_path.exists() else last_path
+    if not weights_path.exists():
+        return False, "Missing best.pt/last.pt in run folder", None
+
+    args_info = _read_run_args(run_dir)
+    testing_dir = (run_dir / "ModelTesting").resolve()
+    if not is_path_inside(testing_dir, run_dir):
+        return False, "Invalid testing directory", None
+
+    try:
+        if testing_dir.exists() and testing_dir.is_dir():
+            shutil.rmtree(testing_dir)
+        testing_dir.mkdir(parents=True, exist_ok=True)
+    except Exception as e:
+        return False, f"Cannot prepare ModelTesting dir: {e}", None
+
+    try:
+        with model_test_task_lock:
+            if MODEL_TEST_TASK.get("status") == "running":
+                _set_model_test_task_locked(
+                    progress=18.0,
+                    message="Loading testing module",
+                    detail=f"{project_name} | {run_folder}",
+                )
+        module = load_train_module()
+        append_log(project_name, f"[{now_str()}] MODEL TEST START: {run_folder}")
+        with model_test_task_lock:
+            if MODEL_TEST_TASK.get("status") == "running":
+                _set_model_test_task_locked(
+                    progress=40.0,
+                    message="Predicting valid split",
+                    detail=f"{project_name} | {run_folder}",
+                )
+        info = module.validate_and_export(
+            weights=str(weights_path),
+            data_yaml=str(data_yaml),
+            img_size=int(args_info.get("imgsz", 640) or 640),
+            device=args_info.get("device", 0),
+            iou=0.65,
+            conf=0.50,
+            output_dir=str(testing_dir),
+        )
+        append_log(project_name, f"[{now_str()}] MODEL TEST DONE: {run_folder}")
+        return True, f"Model testing completed for {run_folder}", {
+            "run_folder": run_folder,
+            "artifacts_dir": str(testing_dir),
+            "info": info,
+        }
+    except Exception as e:
+        append_log(project_name, f"[{now_str()}] MODEL TEST FAILED: {run_folder}: {e}")
+        return False, f"Model testing failed: {e}", None
+
+
+def _read_yolo_label_rows(text: str):
+    rows = []
+    for line in str(text or "").replace("\r\n", "\n").split("\n"):
+        s = line.strip()
+        if not s:
+            continue
+        parts = s.split()
+        if len(parts) < 5:
+            continue
+        try:
+            cls = int(float(parts[0]))
+            cx = float(parts[1])
+            cy = float(parts[2])
+            w = float(parts[3])
+            h = float(parts[4])
+        except Exception:
+            continue
+        rows.append({
+            "cls": cls,
+            "cx": cx,
+            "cy": cy,
+            "w": w,
+            "h": h,
+        })
+    return rows
+
+
+def _read_yolo_label_file(label_file: Path | None):
+    if not label_file or not label_file.exists() or not label_file.is_file():
+        return []
+    try:
+        return _read_yolo_label_rows(label_file.read_text(encoding="utf-8"))
+    except Exception:
+        return []
+
+
+def _load_class_names(data_yaml_path: Path):
+    if not data_yaml_path or not data_yaml_path.exists() or not data_yaml_path.is_file():
+        return {}
+    try:
+        import yaml
+        data = yaml.safe_load(data_yaml_path.read_text(encoding="utf-8")) or {}
+        names = data.get("names", {})
+        if isinstance(names, list):
+            return {i: str(x).strip() for i, x in enumerate(names) if str(x).strip()}
+        if isinstance(names, dict):
+            result = {}
+            for k, v in names.items():
+                try:
+                    result[int(k)] = str(v).strip()
+                except Exception:
+                    pass
+            return result
+    except Exception:
+        pass
+    return {}
+
+
+
+def _draw_label_overlay(image_path: Path, label_rows: list[dict], class_names: dict, output_path: Path, cv2_module):
+    if cv2_module is None:
+        try:
+            output_path.write_bytes(image_path.read_bytes())
+        except Exception:
+            pass
+        return
+
+    try:
+        img = cv2_module.imread(str(image_path))
+        if img is None:
+            output_path.write_bytes(image_path.read_bytes())
+            return
+        h, w = img.shape[:2]
+        for row in label_rows:
+            x1 = int(max(0, (row["cx"] - row["w"] / 2.0) * w))
+            y1 = int(max(0, (row["cy"] - row["h"] / 2.0) * h))
+            x2 = int(min(w - 1, (row["cx"] + row["w"] / 2.0) * w))
+            y2 = int(min(h - 1, (row["cy"] + row["h"] / 2.0) * h))
+            cls_name = str(class_names.get(int(row["cls"]), str(row["cls"])))
+            cv2_module.rectangle(img, (x1, y1), (x2, y2), (0, 255, 0), 2)
+            cv2_module.putText(img, cls_name, (x1, max(12, y1 - 6)), cv2_module.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1, cv2_module.LINE_AA)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        cv2_module.imwrite(str(output_path), img)
+    except Exception:
+        try:
+            output_path.write_bytes(image_path.read_bytes())
+        except Exception:
+            pass
+
+
+def _collect_msa_sample_pairs(sample_root: Path):
+    image_files = {}
+    label_files = {}
+    for path in sample_root.rglob("*"):
+        if not path.is_file():
+            continue
+        suffix = path.suffix.lower()
+        if suffix in IMAGE_EXTS:
+            image_files[path.stem] = path
+        elif suffix == ".txt":
+            label_files[path.stem] = path
+    pairs = []
+    for stem, img_file in sorted(image_files.items()):
+        label_file = label_files.get(stem)
+        if label_file:
+            pairs.append((stem, img_file, label_file))
+    return pairs
+
+
+def build_msa_testing_summary(project_path: Path, run_dir: Path):
+    msa_dir = (run_dir / "ModelTesting_MSA").resolve()
+    if not msa_dir.exists() or not msa_dir.is_dir() or not is_path_inside(msa_dir, run_dir):
+        return {"exists": False}
+
+    results_file = msa_dir / "results.json"
+    if not results_file.exists() or not results_file.is_file():
+        return {"exists": False}
+
+    try:
+        results = json.loads(results_file.read_text(encoding="utf-8")) or {}
+    except Exception:
+        return {"exists": False}
+
+    output_dir = find_output_dir(project_path)
+    export_files = []
+    if output_dir:
+        for name in ["results.json"]:
+            file_path = msa_dir / name
+            if file_path.exists() and file_path.is_file():
+                export_files.append({
+                    "name": name,
+                    "relative_path": file_path.relative_to(output_dir).as_posix(),
+                })
+
+    return {
+        "exists": True,
+        "results": results,
+        "export_files": export_files,
+    }
+
+
+def run_msa_model_testing(project_name: str, run_folder: str, upload_file):
+    run_dir, err = resolve_run_dir(project_name, run_folder)
+    if err or not run_dir:
+        return False, "Run folder not found", None
+
+    project_path = resolve_project_path(project_name)
+    if not project_path or not project_path.exists():
+        return False, "Project not found", None
+
+    data_yaml = find_project_data_yaml(project_path)
+    if data_yaml is None:
+        return False, "Missing data.yaml in project", None
+
+    best_path = run_dir / "weights" / "best.pt"
+    last_path = run_dir / "weights" / "last.pt"
+    weights_path = best_path if best_path.exists() else last_path
+    if not weights_path.exists():
+        return False, "Missing best.pt/last.pt in run folder", None
+
+    if not upload_file:
+        return False, "Missing sample ZIP file", None
+
+    with tempfile.TemporaryDirectory(prefix="msa_upload_") as tmp_dir_str:
+        tmp_dir = Path(tmp_dir_str)
+        zip_path = tmp_dir / "upload.zip"
+        try:
+            upload_file.save(str(zip_path))
+        except Exception:
+            return False, "Unable to save upload file", None
+
+        extract_root = tmp_dir / "extract"
+        extract_root.mkdir(parents=True, exist_ok=True)
+
+        try:
+            with zipfile.ZipFile(zip_path, "r") as zf:
+                for info in zf.infolist():
+                    name = str(info.filename or "").replace("\\", "/")
+                    parts = Path(name).parts
+                    if name.startswith("/") or ".." in parts:
+                        return False, "Invalid zip path", None
+                zf.extractall(path=str(extract_root))
+        except zipfile.BadZipFile:
+            return False, "Bad zip file", None
+        except Exception as e:
+            return False, f"Unable to extract ZIP: {e}", None
+
+        pairs = _collect_msa_sample_pairs(extract_root)
+        if not pairs:
+            return False, "No matching image/label pairs found in ZIP", None
+
+        msa_dir = (run_dir / "ModelTesting_MSA").resolve()
+        if not is_path_inside(msa_dir, run_dir):
+            return False, "Invalid MSA output directory", None
+        try:
+            if msa_dir.exists() and msa_dir.is_dir():
+                shutil.rmtree(msa_dir)
+            msa_dir.mkdir(parents=True, exist_ok=True)
+        except Exception as e:
+            return False, f"Cannot prepare MSA results dir: {e}", None
+
+        gt_vis_dir = msa_dir / "msa_vis" / "gt"
+        pred_vis_dir = msa_dir / "msa_vis" / "pred"
+        gt_vis_dir.mkdir(parents=True, exist_ok=True)
+        pred_vis_dir.mkdir(parents=True, exist_ok=True)
+
+        args_info = _read_run_args(run_dir)
+        module = load_train_module()
+        model = module.YOLO(str(weights_path))
+
+        image_source_dir = tmp_dir / "msa_images"
+        image_source_dir.mkdir(parents=True, exist_ok=True)
+        for stem, img_path, label_path in pairs:
+            dest = image_source_dir / img_path.name
+            shutil.copy2(img_path, dest)
+
+        try:
+            output_predict = tmp_dir / "msa_predict"
+            output_predict.mkdir(parents=True, exist_ok=True)
+            model.predict(
+                source=str(image_source_dir),
+                imgsz=int(args_info.get("imgsz", 640) or 640),
+                device=args_info.get("device", 0),
+                conf=0.25,
+                iou=0.45,
+                save=True,
+                save_txt=True,
+                project=str(tmp_dir),
+                name="msa_predict",
+                exist_ok=True,
+            )
+        except Exception as e:
+            return False, f"MSA prediction failed: {e}", None
+
+        # determine predicted labels and images
+        predicted_labels_dir = output_predict / "msa_predict" / "labels"
+        predicted_images_dir = output_predict / "msa_predict"
+        sample_items = []
+        total_images = 0
+        wrong_images = 0
+        for stem, img_path, label_path in pairs:
+            total_images += 1
+            gt_rows = _read_yolo_label_file(label_path)
+            gt_ids = sorted({int(row["cls"]) for row in gt_rows})
+            gt_vis_path = gt_vis_dir / f"{stem}.jpg"
+            _draw_label_overlay(img_path, gt_rows, _load_class_names(data_yaml), gt_vis_path, getattr(module, "cv2", None))
+
+            pred_label_file = predicted_labels_dir / f"{stem}.txt"
+            pred_rows = _read_yolo_label_file(pred_label_file)
+            pred_ids = sorted({int(row["cls"]) for row in pred_rows})
+
+            predicted_image_path = predicted_images_dir / img_path.name
+            pred_vis_path = pred_vis_dir / f"{stem}.jpg"
+            try:
+                if predicted_image_path.exists() and predicted_image_path.is_file():
+                    shutil.copy2(predicted_image_path, pred_vis_path)
+                else:
+                    shutil.copy2(img_path, pred_vis_path)
+            except Exception:
+                try:
+                    pred_vis_path.write_bytes(img_path.read_bytes())
+                except Exception:
+                    pass
+
+            status = "correct" if gt_ids == pred_ids else "wrong"
+            if status == "wrong":
+                wrong_images += 1
+
+            sample_items.append({
+                "image_name": img_path.name,
+                "gt_class_ids": gt_ids,
+                "pred_class_ids": pred_ids,
+                "status": status,
+                "gt_vis_relative_path": f"{run_dir.name}/ModelTesting_MSA/msa_vis/gt/{gt_vis_path.name}",
+                "pred_vis_relative_path": f"{run_dir.name}/ModelTesting_MSA/msa_vis/pred/{pred_vis_path.name}",
+            })
+
+        results = {
+            "total_images": total_images,
+            "wrong_images": wrong_images,
+            "error_rate": round(((wrong_images / max(1, total_images)) * 100.0), 2),
+            "sample_items": sample_items,
+        }
+
+        results_file = msa_dir / "results.json"
+        try:
+            results_file.write_text(json.dumps(results, ensure_ascii=False, indent=2), encoding="utf-8")
+        except Exception as e:
+            return False, f"Unable to save MSA results: {e}", None
+
+        return True, f"MSA model testing completed for {run_folder}", {
+            "run_folder": run_folder,
+            "run_dir": str(run_dir),
+            "results": results,
+        }
+
+
+def _run_model_test_task(task_id: str, project_name: str, run_folder: str):
+    with model_test_task_lock:
+        _set_model_test_task_locked(
+            progress=8.0,
+            message="Preparing model testing",
+            detail=f"{project_name} | {run_folder}",
+        )
+
+    ok, message, payload = run_model_testing(project_name, run_folder)
+
+    with model_test_task_lock:
+        if MODEL_TEST_TASK.get("id") != task_id:
+            return
+        _set_model_test_task_locked(
+            status="success" if ok else "failed",
+            progress=100.0 if ok else max(1.0, float(MODEL_TEST_TASK.get("progress") or 0.0)),
+            message=message,
+            detail=f"{project_name} | {run_folder}",
+            ended_at=time.time(),
+            result=payload if ok else None,
+        )
+
+
+def start_model_test_task(project_name: str, run_folder: str):
+    with model_test_task_lock:
+        if MODEL_TEST_TASK.get("status") == "running":
+            same_task = (
+                str(MODEL_TEST_TASK.get("project") or "") == str(project_name or "")
+                and str(MODEL_TEST_TASK.get("run_folder") or "") == str(run_folder or "")
+            )
+            if same_task:
+                return True, "Model testing is already running", {
+                    "task_id": MODEL_TEST_TASK.get("id"),
+                    "status": MODEL_TEST_TASK.get("status"),
+                }
+            return False, "Another model testing task is already running", None
+
+        task_id = f"modeltest-{int(time.time() * 1000)}"
+        _set_model_test_task_locked(
+            id=task_id,
+            project=project_name,
+            run_folder=run_folder,
+            status="running",
+            progress=3.0,
+            message="Starting model testing",
+            detail=f"{project_name} | {run_folder}",
+            started_at=time.time(),
+            ended_at=0.0,
+            result=None,
+        )
+
+    thread = threading.Thread(
+        target=_run_model_test_task,
+        args=(task_id, project_name, run_folder),
+        daemon=True,
+    )
+    thread.start()
+    return True, "Model testing started", {
+        "task_id": task_id,
+        "status": "running",
+    }
+
+
+def _project_task_progress_cb(progress: float, message: str, detail: str = ""):
+    with project_fs_task_lock:
+        if PROJECT_FS_TASK.get("status") == "running":
+            _set_project_fs_task_locked(
+                progress=max(0.0, min(99.0, float(progress or 0.0))),
+                message=str(message or ""),
+                detail=str(detail or ""),
+            )
+
+
+def _ensure_project_task_allowed(project_name: str):
+    project_path = resolve_project_path(project_name)
+    if not project_path or not project_path.exists():
+        return False, "Không tìm thấy project", None
+    if not is_path_inside(project_path, ROOT_DIR):
+        return False, "Đường dẫn project không hợp lệ", None
+    with state_lock:
+        info = STATE["projects"].get(project_name)
+        if info and (info.get("status") == "running" or project_name in STATE["queue"] or STATE.get("current") == project_name):
+            return False, "Project đang chạy hoặc đang trong queue", None
+    return True, "", project_path
+
+
+def _collect_tree_paths(root_path: Path):
+    files = []
+    dirs = [root_path]
+    for current_root, dir_names, file_names in os.walk(root_path):
+        current = Path(current_root)
+        for dir_name in dir_names:
+            dirs.append(current / dir_name)
+        for file_name in file_names:
+            files.append(current / file_name)
+    return files, dirs
+
+
+def duplicate_project_with_progress(project_name: str, new_name: str):
+    ok, err, project_path = _ensure_project_task_allowed(project_name)
+    if not ok:
+        return False, err, None
+
+    if not new_name:
+        new_name = get_available_duplicate_name(project_name)
+    if not is_valid_project_name(new_name):
+        return False, "Tên project không hợp lệ", None
+
+    target_path = ROOT_DIR / new_name
+    if target_path.exists():
+        return False, "Project đích đã tồn tại", None
+
+    files, dirs = _collect_tree_paths(project_path)
+    total_steps = max(1, len(files) + len(dirs))
+
+    _project_task_progress_cb(6.0, "Preparing duplicate", project_name)
+    target_path.mkdir(parents=True, exist_ok=False)
+    completed = 1
+    _project_task_progress_cb(10.0, "Created target folder", str(target_path))
+
+    for dir_path in sorted(dirs[1:], key=lambda p: len(p.parts)):
+        rel = dir_path.relative_to(project_path)
+        (target_path / rel).mkdir(parents=True, exist_ok=True)
+        completed += 1
+        pct = 10.0 + (completed / total_steps) * 82.0
+        _project_task_progress_cb(pct, f"Creating folders: {completed}/{total_steps}", rel.as_posix())
+
+    for file_path in files:
+        rel = file_path.relative_to(project_path)
+        dst = target_path / rel
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(file_path, dst)
+        completed += 1
+        pct = 10.0 + (completed / total_steps) * 82.0
+        _project_task_progress_cb(pct, f"Copying files: {completed}/{total_steps}", rel.as_posix())
+
+    _project_task_progress_cb(96.0, "Refreshing project list", new_name)
+    scan_projects()
+    return True, f"Đã nhân bản project thành {new_name}", {"project": new_name}
+
+
+def rename_project_with_progress(project_name: str, new_name: str):
+    ok, err, project_path = _ensure_project_task_allowed(project_name)
+    if not ok:
+        return False, err, None
+    if not new_name:
+        return False, "Thiếu tên project", None
+    if not is_valid_project_name(new_name):
+        return False, "Tên project không hợp lệ", None
+    if project_name == new_name:
+        return True, "Tên project không thay đổi", {"project": new_name}
+
+    target_path = ROOT_DIR / new_name
+    if target_path.exists():
+        return False, "Project đích đã tồn tại", None
+
+    _project_task_progress_cb(18.0, "Preparing rename", project_name)
+    shutil.move(str(project_path), str(target_path))
+    _project_task_progress_cb(88.0, "Refreshing project list", new_name)
+    scan_projects()
+    return True, f"Đã đổi tên project thành {new_name}", {"project": new_name}
+
+
+def delete_project_with_progress(project_name: str):
+    ok, err, project_path = _ensure_project_task_allowed(project_name)
+    if not ok:
+        return False, err, None
+
+    files, dirs = _collect_tree_paths(project_path)
+    total_steps = max(1, len(files) + len(dirs))
+    completed = 0
+    _project_task_progress_cb(8.0, "Preparing delete", project_name)
+
+    for file_path in files:
+        rel = file_path.relative_to(project_path)
+        file_path.unlink(missing_ok=True)
+        completed += 1
+        pct = 8.0 + (completed / total_steps) * 84.0
+        _project_task_progress_cb(pct, f"Deleting files: {completed}/{total_steps}", rel.as_posix())
+
+    for dir_path in sorted(dirs, key=lambda p: len(p.parts), reverse=True):
+        if dir_path.exists():
+            dir_path.rmdir()
+        completed += 1
+        rel = "." if dir_path == project_path else dir_path.relative_to(project_path).as_posix()
+        pct = 8.0 + (completed / total_steps) * 84.0
+        _project_task_progress_cb(pct, f"Removing folders: {completed}/{total_steps}", rel)
+
+    with state_lock:
+        STATE["projects"].pop(project_name, None)
+        bump_state_version_locked()
+
+    _project_task_progress_cb(96.0, "Refreshing project list", project_name)
+    scan_projects()
+    return True, f"Đã xóa project {project_name}", {"project": project_name}
+
+
+def run_project_fs_task(project_name: str, operation: str, payload: dict | None = None):
+    payload = dict(payload or {})
+    op = str(operation or "").strip().lower()
+    if op == "duplicate":
+        return duplicate_project_with_progress(project_name, str(payload.get("new_name", "") or "").strip())
+    if op == "rename":
+        return rename_project_with_progress(project_name, str(payload.get("new_name", "") or "").strip())
+    if op == "delete":
+        return delete_project_with_progress(project_name)
+    return False, f"Unsupported project task: {operation}", None
+
+
+def _run_project_fs_task(task_id: str, project_name: str, operation: str, payload: dict | None = None):
+    with project_fs_task_lock:
+        _set_project_fs_task_locked(
+            progress=4.0,
+            message="Preparing project task",
+            detail=f"{operation} | {project_name}",
+        )
+
+    ok, message, result = run_project_fs_task(project_name, operation, payload)
+
+    with project_fs_task_lock:
+        if PROJECT_FS_TASK.get("id") != task_id:
+            return
+        _set_project_fs_task_locked(
+            status="success" if ok else "failed",
+            progress=100.0 if ok else max(1.0, float(PROJECT_FS_TASK.get("progress") or 0.0)),
+            message=message,
+            detail=str((result or {}).get("project") or f"{operation} | {project_name}"),
+            ended_at=time.time(),
+            result=result if ok else None,
+        )
+
+
+def start_project_fs_task(project_name: str, operation: str, payload: dict | None = None):
+    op = str(operation or "").strip().lower()
+    with project_fs_task_lock:
+        if PROJECT_FS_TASK.get("status") == "running":
+            same_task = (
+                str(PROJECT_FS_TASK.get("project") or "") == str(project_name or "")
+                and str(PROJECT_FS_TASK.get("operation") or "") == op
+            )
+            if same_task:
+                return True, "Project task is already running", {
+                    "task_id": PROJECT_FS_TASK.get("id"),
+                    "status": PROJECT_FS_TASK.get("status"),
+                }
+            return False, "Another project task is already running", None
+
+        task_id = f"projectfs-{int(time.time() * 1000)}"
+        _set_project_fs_task_locked(
+            id=task_id,
+            project=project_name,
+            operation=op,
+            target=str((payload or {}).get("new_name") or ""),
+            status="running",
+            progress=2.0,
+            message="Starting project task",
+            detail=f"{op} | {project_name}",
+            started_at=time.time(),
+            ended_at=0.0,
+            result=None,
+        )
+
+    thread = threading.Thread(
+        target=_run_project_fs_task,
+        args=(task_id, project_name, op, dict(payload or {})),
+        daemon=True,
+    )
+    thread.start()
+    return True, "Project task started", {
+        "task_id": task_id,
+        "status": "running",
+    }
+
+
+def clear_dataset_for_project(project_name: str, progress_cb=None):
+    project_path = resolve_project_path(project_name)
+    if not project_path or not project_path.exists():
+        return False, "Không tìm thấy project", None
+    if not is_path_inside(project_path, ROOT_DIR):
+        return False, "Đường dẫn project không hợp lệ", None
+
+    with state_lock:
+        info = STATE["projects"].get(project_name)
+        if info and (info.get("status") == "running" or project_name in STATE["queue"] or STATE.get("current") == project_name):
+            return False, "Project đang chạy hoặc đang trong queue", None
+
+    if callable(progress_cb):
+        try:
+            progress_cb(8.0, "Preparing dataset cleanup", project_name)
+        except Exception:
+            pass
+
+    def _clear_progress(done, total, folder_name, stage):
+        if not callable(progress_cb):
+            return
+        pct = 18.0 + ((float(done or 0) / max(1.0, float(total or 1))) * 72.0)
+        label = "Removing" if stage != "done" else "Removed"
+        progress_cb(pct, f"{label} dataset folder: {folder_name}", project_name)
+
+    try:
+        removed = clear_project_dataset_dirs(project_path, progress_cb=_clear_progress)
+    except Exception as e:
+        return False, f"Không clear dataset được: {e}", None
+
+    if not removed:
+        return True, "Không có thư mục dataset nào để xóa", {"removed": []}
+
+    return True, f"Đã xóa: {', '.join(removed)}", {"removed": removed}
+
+
+def run_dataset_task(project_name: str, operation: str, payload: dict | None = None):
+    payload = dict(payload or {})
+    op = str(operation or "").strip().lower()
+
+    def progress_cb(progress, message, detail=""):
+        with dataset_task_lock:
+            if DATASET_TASK.get("status") == "running":
+                _set_dataset_task_locked(
+                    progress=max(0.0, min(99.0, float(progress or 0.0))),
+                    message=str(message or ""),
+                    detail=str(detail or project_name),
+                )
+
+    if op == "create":
+        split_mode = str(payload.get("split_mode", "count") or "count").strip().lower()
+        return create_dataset_for_project(project_name, payload, split_mode=split_mode, progress_cb=progress_cb)
+    if op == "merge":
+        return merge_train_valid_to_train(project_name, progress_cb=progress_cb)
+    if op == "clear":
+        return clear_dataset_for_project(project_name, progress_cb=progress_cb)
+    return False, f"Unsupported dataset operation: {operation}", None
+
+
+def _run_dataset_task(task_id: str, project_name: str, operation: str, payload: dict | None = None):
+    with dataset_task_lock:
+        _set_dataset_task_locked(
+            progress=6.0,
+            message="Preparing dataset task",
+            detail=f"{operation} | {project_name}",
+        )
+
+    ok, message, result = run_dataset_task(project_name, operation, payload)
+
+    with dataset_task_lock:
+        if DATASET_TASK.get("id") != task_id:
+            return
+        _set_dataset_task_locked(
+            status="success" if ok else "failed",
+            progress=100.0 if ok else max(1.0, float(DATASET_TASK.get("progress") or 0.0)),
+            message=message,
+            detail=f"{operation} | {project_name}",
+            ended_at=time.time(),
+            result=result if ok else None,
+        )
+
+
+def start_dataset_task(project_name: str, operation: str, payload: dict | None = None):
+    op = str(operation or "").strip().lower()
+    with dataset_task_lock:
+        if DATASET_TASK.get("status") == "running":
+            same_task = (
+                str(DATASET_TASK.get("project") or "") == str(project_name or "")
+                and str(DATASET_TASK.get("operation") or "") == op
+            )
+            if same_task:
+                return True, "Dataset task is already running", {
+                    "task_id": DATASET_TASK.get("id"),
+                    "status": DATASET_TASK.get("status"),
+                }
+            return False, "Another dataset task is already running", None
+
+        task_id = f"dataset-{int(time.time() * 1000)}"
+        _set_dataset_task_locked(
+            id=task_id,
+            project=project_name,
+            operation=op,
+            status="running",
+            progress=2.0,
+            message="Starting dataset task",
+            detail=f"{op} | {project_name}",
+            started_at=time.time(),
+            ended_at=0.0,
+            result=None,
+        )
+
+    thread = threading.Thread(
+        target=_run_dataset_task,
+        args=(task_id, project_name, op, dict(payload or {})),
+        daemon=True,
+    )
+    thread.start()
+    return True, "Dataset task started", {
+        "task_id": task_id,
+        "status": "running",
+    }
 
 
 def get_success_project_outputs():
@@ -2559,6 +3599,79 @@ def get_success_project_outputs():
 
     rows.sort(key=lambda x: str(x["project_name"]).lower())
     return rows
+
+
+def infer_completed_project_status(project_path: Path) -> tuple[str, int]:
+    output_dir = find_output_dir(project_path)
+    if output_dir and output_dir.exists() and output_dir.is_dir():
+        try:
+            for run_dir in output_dir.iterdir():
+                if not run_dir.is_dir() or not run_dir.name.lower().startswith("model_train"):
+                    continue
+                if (run_dir / "results.csv").exists():
+                    return "success", 0
+                weights_dir = run_dir / "weights"
+                if weights_dir.exists() and any(
+                    p.exists() for p in (weights_dir / "best.pt", weights_dir / "last.pt")
+                ):
+                    return "success", 0
+        except Exception:
+            pass
+    return "stopped", -15
+
+
+def finalize_stale_running_projects_locked(monitor_is_training: bool, matched_project_name: str | None):
+    changed = False
+    matched_project_name = str(matched_project_name or "").strip()
+
+    if monitor_is_training:
+        return changed
+
+    for name, info in STATE["projects"].items():
+        if str(info.get("status") or "").strip() != "running":
+            continue
+        if matched_project_name and name == matched_project_name:
+            continue
+
+        project_path_raw = str(info.get("path") or "").strip()
+        if not project_path_raw:
+            continue
+
+        try:
+            project_path = Path(project_path_raw).resolve()
+        except Exception:
+            continue
+
+        if find_project_train_pids(project_path):
+            continue
+
+        final_status, returncode = infer_completed_project_status(project_path)
+        info["status"] = final_status
+        info["progress"] = 100.0 if final_status == "success" else 0.0
+        info["last_end"] = now_str()
+        info["last_returncode"] = returncode
+        info["pid"] = None
+
+        if final_status == "success":
+            info["last_log"].append(f"[{now_str()}] TRAIN RECOVERED AS SUCCESS AFTER APP RESTART")
+        else:
+            info["last_log"].append(f"[{now_str()}] TRAIN RECOVERED AS STOPPED AFTER APP RESTART")
+
+        history = STATE.get("history") or []
+        last_history = history[-1] if history else None
+        if not (
+            isinstance(last_history, dict)
+            and str(last_history.get("project") or "") == name
+            and str(last_history.get("status") or "") == final_status
+        ):
+            record_train_history_locked(name, final_status, returncode)
+
+        if str(STATE.get("current") or "").strip() == name:
+            STATE["current"] = None
+
+        changed = True
+
+    return changed
 
 
 def sync_running_project_progress_from_data_locked(ok, data):
@@ -2622,6 +3735,9 @@ def sync_running_project_progress_from_data_locked(ok, data):
         if not p.get("last_start"):
             p["last_start"] = now_str()
             changed = True
+
+    if finalize_stale_running_projects_locked(monitor_is_training, matched_project_name):
+        changed = True
 
     MONITOR_CACHE["matched_project_name"] = matched_project_name
     return matched_project_name, changed
@@ -2795,6 +3911,7 @@ def run_project(project_name):
         p["last_returncode"] = None
         p["last_log"] = []
         STATE["current"] = project_name
+        sync_queue_session_file_locked()
         bump_state_version_locked()
 
     train_cmd = [sys.executable, str(train_script)]
@@ -2925,6 +4042,7 @@ def run_project(project_name):
 
         with state_lock:
             STATE["current"] = None
+            sync_queue_session_file_locked()
             bump_state_version_locked()
         mark_current_train_control(None, None, pid=None, stop_requested=False)
 
@@ -2940,13 +4058,48 @@ def worker_loop():
             with state_lock:
                 if not STATE["queue"]:
                     STATE["worker_running"] = False
+                    sync_queue_session_file_locked()
                     bump_state_version_locked()
                     return
             continue
 
+        should_wait = False
         with state_lock:
-            if project_name in STATE["queue"]:
-                STATE["queue"].remove(project_name)
+            p = ensure_project_state(project_name)
+
+            if project_name not in STATE["queue"] and p.get("status") != "queued":
+                should_wait = False
+                skip_item = True
+            else:
+                skip_item = False
+                if is_train_slot_busy_locked(exclude_project=project_name):
+                    p["status"] = "queued"
+                    p["progress"] = 0.0
+                    if project_name not in STATE["queue"]:
+                        STATE["queue"].append(project_name)
+                        sync_queue_session_file_locked()
+                        bump_state_version_locked()
+                    should_wait = True
+                else:
+                    if project_name in STATE["queue"]:
+                        STATE["queue"].remove(project_name)
+                        sync_queue_session_file_locked()
+
+        if skip_item:
+            try:
+                train_queue.task_done()
+            except Exception:
+                pass
+            continue
+
+        if should_wait:
+            train_queue.put(project_name)
+            try:
+                train_queue.task_done()
+            except Exception:
+                pass
+            time.sleep(1.0)
+            continue
 
         run_project(project_name)
 
@@ -2965,6 +4118,7 @@ def worker_loop():
                         except queue.Empty:
                             break
                     STATE["worker_running"] = False
+                    sync_queue_session_file_locked()
                     bump_state_version_locked()
                     return
 
@@ -3019,79 +4173,23 @@ def require_auth():
     return redirect(url_for("login", next=get_next_url(default=path)))
 
 
-@app.route("/login", methods=["GET", "POST"])
-def login():
-    if request.method == "POST":
-        username = (request.form.get("username", "") or "").strip()
-        password = request.form.get("password", "") or ""
-        next_url = get_next_url(default="/")
-        creds = load_user_credentials()
-        expected_username = str(creds.get("username", "")).strip()
-
-        if hmac.compare_digest(username, expected_username) and verify_password(password, creds):
-            mark_authenticated(expected_username)
-            return redirect(next_url)
-
-        return render_template(
-            "login.html",
-            error="Invalid username or password",
-            next_url=next_url
-        ), 401
-
-    if is_authenticated():
-        return redirect(get_next_url(default="/"))
-
-    return render_template(
-        "login.html",
-        error="",
-        next_url=get_next_url(default="/")
-    )
-
-
-@app.route("/logout", methods=["POST"])
-def logout():
-    clear_auth()
-    return jsonify({"ok": True, "message": "Logged out"})
-
-
-@app.route("/healthz")
-def healthz():
-    with state_lock:
-        payload = {
-            "ok": True,
-            "worker_running": bool(STATE.get("worker_running")),
-            "queue_size": len(STATE.get("queue") or []),
-            "project_count": len(STATE.get("projects") or {}),
-            "version": int(STATE.get("version", 0)),
-            "monitor_ok": bool(MONITOR_CACHE.get("status_ok") or MONITOR_CACHE.get("history_ok")),
-            "time": now_str(),
-        }
-    return jsonify(payload)
-
-
-@app.route("/")
-def index():
-    creds = load_user_credentials()
-    default_user = str(creds.get("username", "")).strip() or "admin"
-    return render_template(
-        "index.html",
-        root_dir=str(ROOT_DIR),
-        train_monitor_url=f"http://{TRAIN_MONITOR_HOST}:{TRAIN_MONITOR_PORT}",
-        auth_user=session.get("auth_user", default_user)
-    )
-
-
-@app.route("/project_editor")
-def project_editor_page():
-    project = request.args.get("project", "").strip()
-    if not project:
-        return redirect(url_for("index"))
-
-    project_path = resolve_project_path(project)
-    if not project_path or not project_path.exists():
-        abort(404)
-
-    return render_template("project_editor.html", project_name=project)
+register_basic_routes(
+    app,
+    get_next_url=get_next_url,
+    is_authenticated=is_authenticated,
+    load_user_credentials=load_user_credentials,
+    verify_password=verify_password,
+    mark_authenticated=mark_authenticated,
+    clear_auth=clear_auth,
+    state_lock=state_lock,
+    state=STATE,
+    monitor_cache=MONITOR_CACHE,
+    now_str=now_str,
+    root_dir=ROOT_DIR,
+    train_monitor_host=TRAIN_MONITOR_HOST,
+    train_monitor_port=TRAIN_MONITOR_PORT,
+    resolve_project_path=resolve_project_path,
+)
 
 
 @app.route("/api/scan", methods=["POST"])
@@ -3249,6 +4347,62 @@ def api_queue_all():
     })
 
 
+@app.route("/api/queue_session/status")
+def api_queue_session_status():
+    data = load_queue_session_file()
+    projects = []
+    for name in list(data.get("projects") or []):
+        text = str(name or "").strip()
+        if text and text not in projects:
+            projects.append(text)
+
+    with state_lock:
+        active_now = bool(STATE.get("current")) or bool(STATE.get("queue"))
+
+    return jsonify({
+        "ok": True,
+        "pending": bool(projects) and not active_now,
+        "projects": projects,
+        "saved_at": str(data.get("saved_at") or ""),
+        "current": str(data.get("current") or ""),
+        "queue": [str(x or "").strip() for x in list(data.get("queue") or []) if str(x or "").strip()],
+    })
+
+
+@app.route("/api/queue_session/ignore", methods=["POST"])
+def api_queue_session_ignore():
+    clear_queue_session_file()
+    write_audit_log("queue_session_ignore", "success", details="Ignored last queue session")
+    return jsonify({"ok": True, "message": "Ignored last session"})
+
+
+@app.route("/api/queue_session/continue", methods=["POST"])
+def api_queue_session_continue():
+    data = load_queue_session_file()
+    projects = []
+    for name in list(data.get("projects") or []):
+        text = str(name or "").strip()
+        if text and text not in projects:
+            projects.append(text)
+
+    if not projects:
+        return jsonify({"ok": False, "message": "No saved queue session"}), 404
+
+    clear_queue_session_file()
+    added, skipped = queue_projects(projects)
+    write_audit_log(
+        "queue_session_continue",
+        "success",
+        details=f"Continue last session: added={len(added)}, skipped={len(skipped)}",
+    )
+    return jsonify({
+        "ok": True,
+        "added": added,
+        "skipped": skipped,
+        "message": f"Continued last session: added {len(added)}, skipped {len(skipped)}",
+    })
+
+
 @app.route("/api/retry_failed", methods=["POST"])
 def api_retry_failed():
     added, skipped = retry_failed_projects()
@@ -3308,10 +4462,11 @@ def api_history_clear():
 
     with state_lock:
         clear_train_history_locked()
+        clear_monitor_cache_locked()
         bump_state_version_locked()
 
-    write_audit_log("history_clear", "success", details="Training history cleared")
-    return jsonify({"ok": True, "message": "Đã xóa lịch sử train"})
+    write_audit_log("history_clear", "success", details="Training history and status cleared")
+    return jsonify({"ok": True, "message": "Đã xóa lịch sử train và trạng thái"})
 
 
 @app.route("/api/project/rename", methods=["POST"])
@@ -3330,43 +4485,9 @@ def api_project_rename():
     if not is_valid_project_name(new_name):
         write_audit_log("project_rename", "failed", project=project, target=new_name, details="Invalid project name")
         return jsonify({"ok": False, "message": "Tên project không hợp lệ"}), 400
-    if project == new_name:
-        write_audit_log("project_rename", "noop", project=project, target=new_name, details="New name equals old name")
-        return jsonify({"ok": True, "message": "Tên project không thay đổi"}), 200
-
-    project_path = resolve_project_path(project)
-    if not project_path or not project_path.exists():
-        write_audit_log("project_rename", "failed", project=project, target=new_name, details="Project not found")
-        return jsonify({"ok": False, "message": "Không tìm thấy project"}), 404
-
-    target_path = ROOT_DIR / new_name
-    if target_path.exists():
-        write_audit_log("project_rename", "failed", project=project, target=new_name, details="Target project already exists")
-        return jsonify({"ok": False, "message": "Project đích đã tồn tại"}), 400
-
-    with state_lock:
-        info = STATE["projects"].get(project)
-        if info and (info.get("status") == "running" or project in STATE["queue"] or STATE.get("current") == project):
-            write_audit_log("project_rename", "blocked", project=project, target=new_name, details="Project is running or queued")
-            return jsonify({"ok": False, "message": "Project đang chạy hoặc đang trong queue"}), 400
-
-    try:
-        shutil.move(str(project_path), str(target_path))
-    except Exception as e:
-        write_audit_log("project_rename", "failed", project=project, target=new_name, details=f"Move failed: {e}")
-        return jsonify({"ok": False, "message": f"Không đổi tên được project: {e}"}), 500
-
-    with state_lock:
-        info = STATE["projects"].pop(project, None)
-        if info:
-            info["name"] = new_name
-            info["path"] = str(target_path)
-            STATE["projects"][new_name] = info
-        bump_state_version_locked()
-
-    scan_projects()
-    write_audit_log("project_rename", "success", project=project, target=new_name, details="Project renamed")
-    return jsonify({"ok": True, "message": f"Đã đổi tên project thành {new_name}", "project": new_name})
+    ok, message, payload = start_project_fs_task(project, "rename", {"new_name": new_name})
+    write_audit_log("project_rename", "started" if ok else "failed", project=project, target=new_name, details=message)
+    return jsonify({"ok": ok, "message": message, **(payload or {})}), (200 if ok else 400)
 
 
 @app.route("/api/project/duplicate", methods=["POST"])
@@ -3383,31 +4504,9 @@ def api_project_duplicate():
         write_audit_log("project_duplicate", "failed", details="Missing project name")
         return jsonify({"ok": False, "message": "Thiếu tên project"}), 400
 
-    project_path = resolve_project_path(project)
-    if not project_path or not project_path.exists():
-        write_audit_log("project_duplicate", "failed", project=project, target=new_name, details="Project not found")
-        return jsonify({"ok": False, "message": "Không tìm thấy project"}), 404
-
-    if not new_name:
-        new_name = get_available_duplicate_name(project)
-    if not is_valid_project_name(new_name):
-        write_audit_log("project_duplicate", "failed", project=project, target=new_name, details="Invalid target project name")
-        return jsonify({"ok": False, "message": "Tên project không hợp lệ"}), 400
-
-    target_path = ROOT_DIR / new_name
-    if target_path.exists():
-        write_audit_log("project_duplicate", "failed", project=project, target=new_name, details="Target project already exists")
-        return jsonify({"ok": False, "message": "Project đích đã tồn tại"}), 400
-
-    try:
-        shutil.copytree(project_path, target_path)
-    except Exception as e:
-        write_audit_log("project_duplicate", "failed", project=project, target=new_name, details=f"Copy failed: {e}")
-        return jsonify({"ok": False, "message": f"Không nhân bản được project: {e}"}), 500
-
-    scan_projects()
-    write_audit_log("project_duplicate", "success", project=project, target=new_name, details="Project duplicated")
-    return jsonify({"ok": True, "message": f"Đã nhân bản project thành {new_name}", "project": new_name})
+    ok, message, payload = start_project_fs_task(project, "duplicate", {"new_name": new_name})
+    write_audit_log("project_duplicate", "started" if ok else "failed", project=project, target=new_name, details=message)
+    return jsonify({"ok": ok, "message": message, **(payload or {})}), (200 if ok else 400)
 
 
 @app.route("/api/project/backup", methods=["POST"])
@@ -3418,7 +4517,12 @@ def api_project_backup():
         write_audit_log("project_backup", "failed", details="Missing project name")
         return jsonify({"ok": False, "message": "Thiếu tên project"}), 400
 
-    ok, message, task_id = start_project_backup(project)
+    ok, message, task_id = backup_start_project_backup(
+        project,
+        BACKUP_ROOT,
+        BACKUP_COPY_CHUNK_SIZE,
+        resolve_project_path,
+    )
     if not ok:
         write_audit_log("project_backup", "failed", project=project, details=message)
         return jsonify({"ok": False, "message": message}), 400
@@ -3434,7 +4538,7 @@ def api_project_backup():
 
 @app.route("/api/project/backup_status")
 def api_project_backup_status():
-    return jsonify(build_backup_status_payload())
+    return jsonify(backup_build_backup_status_payload())
 
 
 @app.route("/api/project/delete", methods=["POST"])
@@ -3450,33 +4554,9 @@ def api_project_delete():
         write_audit_log("project_delete", "failed", details="Missing project name")
         return jsonify({"ok": False, "message": "Thiếu tên project"}), 400
 
-    project_path = resolve_project_path(project)
-    if not project_path or not project_path.exists():
-        write_audit_log("project_delete", "failed", project=project, details="Project not found")
-        return jsonify({"ok": False, "message": "Không tìm thấy project"}), 404
-    if not is_path_inside(project_path, ROOT_DIR):
-        write_audit_log("project_delete", "failed", project=project, details="Invalid project path")
-        return jsonify({"ok": False, "message": "Đường dẫn project không hợp lệ"}), 400
-
-    with state_lock:
-        info = STATE["projects"].get(project)
-        if info and (info.get("status") == "running" or project in STATE["queue"] or STATE.get("current") == project):
-            write_audit_log("project_delete", "blocked", project=project, details="Project is running or queued")
-            return jsonify({"ok": False, "message": "Project đang chạy hoặc đang trong queue"}), 400
-
-    try:
-        shutil.rmtree(project_path)
-    except Exception as e:
-        write_audit_log("project_delete", "failed", project=project, details=f"Delete failed: {e}")
-        return jsonify({"ok": False, "message": f"Không xóa được project: {e}"}), 500
-
-    with state_lock:
-        STATE["projects"].pop(project, None)
-        bump_state_version_locked()
-
-    scan_projects()
-    write_audit_log("project_delete", "success", project=project, details="Project deleted")
-    return jsonify({"ok": True, "message": f"Đã xóa project {project}"})
+    ok, message, payload = start_project_fs_task(project, "delete", {"project": project})
+    write_audit_log("project_delete", "started" if ok else "failed", project=project, details=message)
+    return jsonify({"ok": ok, "message": message, **(payload or {})}), (200 if ok else 400)
 
 
 @app.route("/api/project/clear_dataset", methods=["POST"])
@@ -3499,29 +4579,13 @@ def api_project_clear_dataset():
     if not is_path_inside(project_path, ROOT_DIR):
         write_audit_log("project_clear_dataset", "failed", project=project, details="Invalid project path")
         return jsonify({"ok": False, "message": "Đường dẫn project không hợp lệ"}), 400
-
-    with state_lock:
-        info = STATE["projects"].get(project)
-        if info and (info.get("status") == "running" or project in STATE["queue"] or STATE.get("current") == project):
-            write_audit_log("project_clear_dataset", "blocked", project=project, details="Project is running or queued")
-            return jsonify({"ok": False, "message": "Project đang chạy hoặc đang trong queue"}), 400
-
-    try:
-        removed = clear_project_dataset_dirs(project_path)
-    except Exception as e:
-        write_audit_log("project_clear_dataset", "failed", project=project, details=f"Clear dataset failed: {e}")
-        return jsonify({"ok": False, "message": f"Không clear dataset được: {e}"}), 500
-
-    if not removed:
-        write_audit_log("project_clear_dataset", "noop", project=project, details="No dataset directories to remove")
-        return jsonify({"ok": True, "message": "Không có thư mục dataset nào để xóa", "removed": []})
-
-    write_audit_log("project_clear_dataset", "success", project=project, details=f"Removed: {', '.join(removed)}")
+    ok, message, payload = start_dataset_task(project, "clear", {"project": project})
+    write_audit_log("project_clear_dataset", "started" if ok else "failed", project=project, details=message)
     return jsonify({
-        "ok": True,
-        "message": f"Đã xóa: {', '.join(removed)}",
-        "removed": removed
-    })
+        "ok": ok,
+        "message": message,
+        **(payload or {}),
+    }), (200 if ok else 400)
 
 
 @app.route("/api/project/import_data_zip", methods=["POST"])
@@ -3601,15 +4665,17 @@ def api_project_create_dataset():
     if not project:
         return jsonify({"ok": False, "message": "Thiếu tên project"}), 400
 
-    ok, message, payload = create_dataset_for_project(project, data, split_mode=split_mode)
-    if not ok:
-        return jsonify({"ok": False, "message": message}), 400
-
+    ok, message, payload = start_dataset_task(project, "create", {
+        **data,
+        "project": project,
+        "split_mode": split_mode,
+    })
+    write_audit_log("project_create_dataset", "started" if ok else "failed", project=project, details=message)
     return jsonify({
-        "ok": True,
+        "ok": ok,
         "message": message,
         **(payload or {})
-    })
+    }), (200 if ok else 400)
 
 
 @app.route("/api/project/merge_train_valid", methods=["POST"])
@@ -3619,15 +4685,23 @@ def api_project_merge_train_valid():
     if not project:
         return jsonify({"ok": False, "message": "Thiếu tên project"}), 400
 
-    ok, message, payload = merge_train_valid_to_train(project)
-    if not ok:
-        return jsonify({"ok": False, "message": message}), 400
-
+    ok, message, payload = start_dataset_task(project, "merge", {"project": project})
+    write_audit_log("project_merge_train_valid", "started" if ok else "failed", project=project, details=message)
     return jsonify({
-        "ok": True,
+        "ok": ok,
         "message": message,
         **(payload or {})
-    })
+    }), (200 if ok else 400)
+
+
+@app.route("/api/project/dataset_task/status")
+def api_project_dataset_task_status():
+    return jsonify(build_dataset_task_status_payload())
+
+
+@app.route("/api/project/fs_task/status")
+def api_project_fs_task_status():
+    return jsonify(build_project_fs_task_status_payload())
 
 
 @app.route("/api/project/revalidate_run", methods=["POST"])
@@ -3638,7 +4712,7 @@ def api_project_revalidate_run():
     if not project or not run_folder:
         return jsonify({"ok": False, "message": "Missing project or run_folder"}), 400
 
-    ok, message, payload = revalidate_run(project, run_folder)
+    ok, message, payload = start_revalidate_task(project, run_folder)
     write_audit_log(
         "project_revalidate_run",
         "success" if ok else "failed",
@@ -3651,6 +4725,81 @@ def api_project_revalidate_run():
         "message": message,
         **(payload or {}),
     }), (200 if ok else 400)
+
+
+@app.route("/api/project/revalidate_run/status")
+def api_project_revalidate_run_status():
+    return jsonify(build_revalidate_status_payload())
+
+
+@app.route("/api/project/model_testing", methods=["POST"])
+def api_project_model_testing():
+    data = request.get_json(force=True) or {}
+    project = str(data.get("project", "") or "").strip()
+    run_folder = str(data.get("run_folder", "") or "").strip()
+    if not project or not run_folder:
+        return jsonify({"ok": False, "message": "Missing project or run_folder"}), 400
+
+    ok, message, payload = start_model_test_task(project, run_folder)
+    write_audit_log(
+        "project_model_testing",
+        "success" if ok else "failed",
+        project=project,
+        target=run_folder,
+        details=message,
+    )
+    return jsonify({
+        "ok": ok,
+        "message": message,
+        **(payload or {}),
+    }), (200 if ok else 400)
+
+
+@app.route("/api/project/model_testing_msa", methods=["POST"])
+def api_project_model_testing_msa():
+    project = request.form.get("project", "").strip()
+    run_folder = request.form.get("run_folder", "").strip()
+    upload_file = request.files.get("file")
+
+    if not project or not run_folder:
+        return jsonify({"ok": False, "message": "Missing project or run_folder"}), 400
+
+    if not upload_file or not upload_file.filename:
+        return jsonify({"ok": False, "message": "Missing sample ZIP file"}), 400
+
+    ok, message, payload = run_msa_model_testing(project, run_folder, upload_file)
+    write_audit_log(
+        "project_model_testing_msa",
+        "success" if ok else "failed",
+        project=project,
+        target=run_folder,
+        details=message,
+    )
+
+    if not ok:
+        return jsonify({
+            "ok": False,
+            "message": message
+        }), 400
+
+    project_path = resolve_project_path(project)
+    run_dir = Path(payload.get("run_dir", "")) if payload and payload.get("run_dir") else None
+    if project_path and project_path.exists() and run_dir and run_dir.exists():
+        msa_summary = build_msa_testing_summary(project_path, run_dir)
+    else:
+        msa_summary = {}
+
+    return jsonify({
+        "ok": True,
+        "message": message,
+        "run_folder": run_folder,
+        "msa_summary": msa_summary,
+    })
+
+
+@app.route("/api/project/model_testing/status")
+def api_project_model_testing_status():
+    return jsonify(build_model_test_status_payload())
 
 
 @app.route("/api/train_monitor/status")
@@ -3714,7 +4863,7 @@ def api_project_images():
         page = 1
 
     try:
-        page_size = max(1, min(int(request.args.get("page_size", "200")), 1000))
+        page_size = max(1, min(int(request.args.get("page_size", "200")), 1000000))
     except Exception:
         page_size = 200
 
@@ -3722,18 +4871,32 @@ def api_project_images():
     sort_by = str(request.args.get("sort_by", "name") or "name").strip().lower()
     sort_dir = str(request.args.get("sort_dir", "asc") or "asc").strip().lower()
     class_filter_raw = str(request.args.get("class_filter", "") or "").strip()
+    expected_boxes_raw = str(request.args.get("expected_boxes", "") or "").strip()
+    box_compare = str(request.args.get("box_compare", "all") or "all").strip().lower()
+    anomaly_filter = str(request.args.get("anomaly_filter", "all") or "all").strip().lower()
+    anomaly_sensitivity = str(request.args.get("anomaly_sensitivity", "medium") or "medium").strip().lower()
+    target_rel = str(request.args.get("rel", "") or "").strip().replace("\\", "/")
     class_filter = None
+    expected_boxes = None
     if class_filter_raw != "":
         try:
             class_filter = int(class_filter_raw)
         except Exception:
             class_filter = None
+    if expected_boxes_raw != "":
+        try:
+            expected_boxes = max(0, int(expected_boxes_raw))
+        except Exception:
+            expected_boxes = None
 
     project_path = resolve_project_path(project)
     if not project_path or not project_path.exists():
         return jsonify({"ok": False, "message": "Không tìm thấy project"}), 404
 
     image_dir, all_images = list_project_images(project_path, limit=0)
+    bbox_analysis = get_project_bbox_analysis(project)
+    image_analysis_map = dict((bbox_analysis or {}).get("images") or {})
+    group_stats = dict((bbox_analysis or {}).get("group_stats") or {})
     if not image_dir:
         return jsonify({
             "ok": True,
@@ -3751,7 +4914,6 @@ def api_project_images():
         })
 
     items = []
-    need_class_info = (sort_by == "class") or (class_filter is not None)
 
     for rel in all_images:
         abs_path = (image_dir / rel).resolve()
@@ -3761,10 +4923,10 @@ def api_project_images():
         except Exception:
             modified_ts = 0.0
 
-        class_ids = []
-        if need_class_info:
-            label_file, _ = resolve_label_file_for_image(project, rel, create_missing=False)
-            class_ids = extract_class_ids_from_label_file(label_file) if label_file else []
+        label_file, _ = resolve_label_file_for_image(project, rel, create_missing=False)
+        class_ids = extract_class_ids_from_label_file(label_file) if label_file else []
+        analysis_info = evaluate_bbox_image_anomalies(group_stats, dict(image_analysis_map.get(rel) or {}), anomaly_sensitivity)
+        bbox_count = int(analysis_info.get("bbox_count", 0) or 0)
 
         items.append({
             "rel": rel,
@@ -3772,7 +4934,10 @@ def api_project_images():
             "modified_ts": modified_ts,
             "modified_at": datetime.fromtimestamp(modified_ts).strftime("%Y-%m-%d %H:%M:%S") if modified_ts > 0 else "-",
             "class_ids": class_ids,
-            "class_min": class_ids[0] if class_ids else 10**9
+            "class_min": class_ids[0] if class_ids else 10**9,
+            "bbox_count": bbox_count,
+            "bbox_anomaly_count": int(analysis_info.get("anomaly_count", 0) or 0),
+            "bbox_has_anomaly": bool(analysis_info.get("has_anomaly", False)),
         })
 
     if q:
@@ -3780,6 +4945,21 @@ def api_project_images():
 
     if class_filter is not None:
         items = [x for x in items if class_filter in (x.get("class_ids") or [])]
+
+    if expected_boxes is not None:
+        if box_compare == "less":
+            items = [x for x in items if int(x.get("bbox_count", 0) or 0) < expected_boxes]
+        elif box_compare == "greater":
+            items = [x for x in items if int(x.get("bbox_count", 0) or 0) > expected_boxes]
+        elif box_compare == "equal":
+            items = [x for x in items if int(x.get("bbox_count", 0) or 0) == expected_boxes]
+        elif box_compare == "notequal":
+            items = [x for x in items if int(x.get("bbox_count", 0) or 0) != expected_boxes]
+
+    if anomaly_filter == "has":
+        items = [x for x in items if bool(x.get("bbox_has_anomaly"))]
+    elif anomaly_filter == "clean":
+        items = [x for x in items if not bool(x.get("bbox_has_anomaly"))]
 
     if sort_by == "date":
         items.sort(key=lambda x: (x.get("modified_ts", 0.0), str(x.get("name", "")).lower()))
@@ -3793,6 +4973,12 @@ def api_project_images():
 
     total = len(items)
     total_pages = (total + page_size - 1) // page_size if total > 0 else 0
+    if target_rel and total > 0:
+        target_rel_cf = target_rel.casefold()
+        for pos, item in enumerate(items):
+            if str(item.get("rel", "") or "").casefold() == target_rel_cf:
+                page = (pos // page_size) + 1
+                break
     if total_pages > 0:
         page = min(page, total_pages)
     else:
@@ -3801,13 +4987,6 @@ def api_project_images():
     start = (page - 1) * page_size
     end = start + page_size
     page_items = items[start:end]
-    if not need_class_info:
-        for it in page_items:
-            rel = str(it.get("rel", "") or "")
-            label_file, _ = resolve_label_file_for_image(project, rel, create_missing=False)
-            class_ids = extract_class_ids_from_label_file(label_file) if label_file else []
-            it["class_ids"] = class_ids
-            it["class_min"] = class_ids[0] if class_ids else 10**9
     images = [x.get("rel") for x in page_items]
 
     return jsonify({
@@ -3896,6 +5075,7 @@ def api_project_image_info():
 def api_project_label():
     project = request.args.get("project", "").strip()
     rel = request.args.get("rel", "").strip()
+    anomaly_sensitivity = str(request.args.get("anomaly_sensitivity", "medium") or "medium").strip().lower()
     if not project or not rel:
         return jsonify({"ok": False, "message": "Thiếu project hoặc rel"}), 400
 
@@ -3911,13 +5091,24 @@ def api_project_label():
         except Exception:
             text = ""
 
+    bbox_analysis = get_project_bbox_analysis(project)
+    image_rows_info = dict(((bbox_analysis or {}).get("images") or {}).get(rel) or {})
+    group_stats = dict((bbox_analysis or {}).get("group_stats") or {})
+    image_analysis = evaluate_bbox_image_anomalies(group_stats, image_rows_info, anomaly_sensitivity)
+
     return jsonify({
         "ok": True,
         "project": project,
         "rel": rel,
         "exists": exists,
         "label_path": str(label_file) if label_file else None,
-        "text": text
+        "text": text,
+        "bbox_count": int(image_analysis.get("bbox_count", 0) or 0),
+        "bbox_anomaly_count": int(image_analysis.get("anomaly_count", 0) or 0),
+        "bbox_has_anomaly": bool(image_analysis.get("has_anomaly", False)),
+        "anomaly_box_indices": list(image_analysis.get("anomaly_box_indices") or []),
+        "anomaly_items": list(image_analysis.get("anomaly_items") or []),
+        "anomaly_sensitivity": str(image_analysis.get("sensitivity") or anomaly_sensitivity),
     })
 
 
@@ -3940,11 +5131,49 @@ def api_project_label_save():
     except Exception:
         return jsonify({"ok": False, "message": "Không lưu được label"}), 500
 
+    invalidate_project_bbox_analysis(project)
+
     return jsonify({
         "ok": True,
         "message": "Đã lưu label",
         "label_path": str(label_file)
     })
+
+
+@app.route("/api/project/promote_valid_to_train", methods=["POST"])
+def api_project_promote_valid_to_train():
+    data = request.get_json(force=True) or {}
+    project = str(data.get("project", "") or "").strip()
+    source_rel = str(data.get("source_rel", "") or "").strip()
+    valid_rel = str(data.get("valid_rel", "") or "").strip()
+    text = data.get("text")
+
+    if not project or not source_rel:
+        return jsonify({"ok": False, "message": "Thiếu project hoặc source_rel"}), 400
+
+    ok, message, payload = promote_validation_sample_to_train(
+        project_name=project,
+        source_rel=source_rel,
+        valid_rel=valid_rel or None,
+        text=text,
+    )
+    if ok:
+        invalidate_project_bbox_analysis(project)
+        write_audit_log(
+            "project_promote_valid_to_train",
+            "success",
+            project=project,
+            details=f"source={source_rel} valid={valid_rel or source_rel}",
+        )
+        return jsonify({"ok": True, "message": message, **(payload or {})})
+
+    write_audit_log(
+        "project_promote_valid_to_train",
+        "failed",
+        project=project,
+        details=f"source={source_rel} valid={valid_rel or source_rel}: {message}",
+    )
+    return jsonify({"ok": False, "message": message}), 400
 
 
 @app.route("/api/download_weight")
@@ -3979,16 +5208,10 @@ def api_download_weight():
     tmp_dir = tempfile.mkdtemp(prefix="traincontrol_zip_")
     zip_path = Path(tmp_dir) / zip_name
 
-    st = file_path.stat()
-    dt = datetime.fromtimestamp(st.st_mtime)
-    zipinfo = zipfile.ZipInfo(filename=original_name)
-    zipinfo.date_time = (dt.year, dt.month, dt.day, dt.hour, dt.minute, dt.second)
-    zipinfo.compress_type = zipfile.ZIP_DEFLATED
-
     with zipfile.ZipFile(zip_path, "w") as zf:
-        with open(file_path, "rb") as f:
-            data = f.read()
-        zf.writestr(zipinfo, data)
+        write_file_to_zip_preserve_times(zf, file_path, original_name)
+
+    st = file_path.stat()
 
     @after_this_request
     def cleanup(response):
@@ -4020,6 +5243,7 @@ def api_download_success_outputs():
     zip_path = Path(tmp_dir) / zip_name
 
     file_count = 0
+    manifest = []
     with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
         for row in rows:
             project_name = str(row["project_name"])
@@ -4037,8 +5261,26 @@ def api_download_success_outputs():
                     continue
 
                 arcname = f"{project_folder}/{output_folder}/{rel_path}"
-                zf.write(file_path, arcname=arcname)
+                write_file_to_zip_preserve_times(zf, file_path, arcname)
+                try:
+                    st = file_path.stat()
+                    manifest.append({
+                        "path": arcname,
+                        "modified_at": datetime.fromtimestamp(st.st_mtime).strftime("%Y-%m-%d %H:%M:%S"),
+                        "created_at": datetime.fromtimestamp(st.st_ctime).strftime("%Y-%m-%d %H:%M:%S"),
+                        "modified_ts": st.st_mtime,
+                        "created_ts": st.st_ctime,
+                        "size": st.st_size,
+                    })
+                except Exception:
+                    pass
                 file_count += 1
+
+        if manifest:
+            zf.writestr(
+                "traincontrol_zip_manifest.json",
+                json.dumps(manifest, ensure_ascii=False, indent=2),
+            )
 
     if file_count == 0:
         try:
