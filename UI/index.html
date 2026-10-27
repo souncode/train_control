@@ -69,7 +69,7 @@
                     <span class="toolbar-text">Upload project (.zip)</span>
                 </button>
                 <input id="projectZipInput" type="file" accept=".zip,application/zip" style="display:none" onchange="handleProjectUploadInput(this)">
-                <input id="projectDataZipInput" type="file" accept=".zip,application/zip" style="display:none" onchange="handleProjectDataUploadInput(this)">
+                <input id="projectDataZipInput" type="file" accept=".zip,application/zip,image/*" multiple style="display:none" onchange="handleProjectDataUploadInput(this)">
                 <button class="btn-success toolbar-icon-btn" onclick="queueSelected()" data-i18n="train_selected" data-tooltip-key="train_selected" data-icon-key="train_selected">
                     <span class="toolbar-icon" aria-hidden="true">T</span>
                     <span class="toolbar-text">Train project Ä‘Ă£ chá»n</span>
@@ -78,13 +78,17 @@
                     <span class="toolbar-icon" aria-hidden="true">B</span>
                     <span class="toolbar-text">Backup project đã chọn</span>
                 </button>
-                <button class="btn-success toolbar-icon-btn" onclick="downloadSuccessOutputs()" data-i18n="download_success_outputs" data-tooltip-key="download_success_outputs" data-icon-key="download_success_outputs">
-                    <span class="toolbar-icon" aria-hidden="true">D</span>
-                    <span class="toolbar-text">Download success outputs</span>
+                <button class="btn-warning toolbar-icon-btn" onclick="clearSelectedDatasets()" data-i18n="clear_selected_dataset" data-tooltip-key="clear_selected_dataset">
+                    <span class="toolbar-icon" aria-hidden="true">X</span>
+                    <span class="toolbar-text">Clear selected dataset</span>
                 </button>
-                <button class="btn-warning toolbar-icon-btn" onclick="queueAll()" data-i18n="train_all" data-tooltip-key="train_all" data-icon-key="train_all">
-                    <span class="toolbar-icon" aria-hidden="true">A</span>
-                    <span class="toolbar-text">Train táº¥t cáº£</span>
+                <button class="btn-success toolbar-icon-btn" onclick="downloadSelectedOutputs()" data-i18n="download_selected_outputs" data-tooltip-key="download_selected_outputs" data-icon-key="download_selected_outputs">
+                    <span class="toolbar-icon" aria-hidden="true">D</span>
+                    <span class="toolbar-text">Download selected best.pt</span>
+                </button>
+                <button class="btn-warning toolbar-icon-btn" onclick="quickTrainSelectedProjects()" data-i18n="quick_train_selected" data-tooltip-key="quick_train_selected" data-icon-key="train_all">
+                    <span class="toolbar-icon" aria-hidden="true">QT</span>
+                    <span class="toolbar-text">Quick Train Selected Project</span>
                 </button>
                 <button class="btn-danger toolbar-icon-btn" onclick="retryFailed()" data-i18n="retry_failed" data-tooltip-key="retry_failed" data-icon-key="retry_failed">
                     <span class="toolbar-icon" aria-hidden="true">R</span>
@@ -93,6 +97,14 @@
                 <button class="btn-danger toolbar-icon-btn" onclick="clearHistory()" data-i18n="clear_history" data-tooltip-key="clear_history" data-icon-key="clear_history">
                     <span class="toolbar-icon" aria-hidden="true">H</span>
                     <span class="toolbar-text">Clear history</span>
+                </button>
+                <button class="btn-dark toolbar-icon-btn" onclick="showActivityLog()" data-i18n="activity_log" data-tooltip-key="activity_log" data-icon-key="activity_log">
+                    <span class="toolbar-icon" aria-hidden="true">L</span>
+                    <span class="toolbar-text">User log</span>
+                </button>
+                <button class="btn-dark toolbar-icon-btn" onclick="showAccountManager()" data-i18n="account_manager" data-tooltip-key="account_manager" data-icon-key="account_manager">
+                    <span class="toolbar-icon" aria-hidden="true">AC</span>
+                    <span class="toolbar-text">Accounts</span>
                 </button>
                 <button class="btn-warning toolbar-icon-btn" onclick="stopCurrentTrain()" data-i18n="stop_current_train" data-tooltip-key="stop_current_train" data-icon-key="stop_current_train">
                     <span class="toolbar-icon" aria-hidden="true">P</span>
@@ -121,6 +133,10 @@
                 <button class="btn-dark toolbar-icon-btn" onclick="refreshAll()" data-i18n="refresh" data-tooltip-key="refresh" data-icon-key="refresh">
                     <span class="toolbar-icon" aria-hidden="true">F</span>
                     <span class="toolbar-text">Refresh</span>
+                </button>
+                <button class="btn-warning toolbar-icon-btn" onclick="restartServer()" data-i18n="restart_server" data-tooltip-key="restart_server" data-icon-key="restart_server">
+                    <span class="toolbar-icon" aria-hidden="true">RS</span>
+                    <span class="toolbar-text">Restart server</span>
                 </button>
                 <button class="btn-dark toolbar-icon-btn toolbar-notify-btn off" id="notifyBell" onclick="toggleNotify()" data-i18n="telegram_notify" data-tooltip-key="telegram_notify" data-icon-key="notify_telegram">
                     <span class="toolbar-icon" aria-hidden="true">N</span>
@@ -242,6 +258,7 @@
                     <div class="project-table-head-cell col-time" data-i18n="end_time">Káº¿t thĂºc</div>
                     <div class="project-table-head-cell col-rc">RC</div>
                     <div class="project-table-head-cell col-action" data-i18n="action">HĂ nh Ä‘á»™ng</div>
+                    <div class="project-table-head-cell col-note">Note</div>
                 </div>
 
                 <div class="table-wrap">
@@ -256,6 +273,7 @@
                             <col class="col-time">
                             <col class="col-rc">
                             <col class="col-action">
+                            <col class="col-note">
                         </colgroup>
                         <thead>
                             <tr>
@@ -279,10 +297,11 @@
                                 <th class="col-time" data-i18n="end_time">Káº¿t thĂºc</th>
                                 <th class="col-rc">RC</th>
                                 <th class="col-action" data-i18n="action">HĂ nh Ä‘á»™ng</th>
+                                <th class="col-note">Note</th>
                             </tr>
                         </thead>
                         <tbody id="projectTableBody">
-                            <tr><td colspan="9" data-i18n="loading">Äang táº£i dá»¯ liá»‡u...</td></tr>
+                            <tr><td colspan="10" data-i18n="loading">Äang táº£i dá»¯ liá»‡u...</td></tr>
                         </tbody>
                     </table>
                 </div>

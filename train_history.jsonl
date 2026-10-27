@@ -1,27 +1,40 @@
-{"project": "AUDI_SOL_NEWMODEL_V5", "status": "success", "time": "2026-06-22 19:05:37", "returncode": 0}
-{"project": "3DC1103 - Object Detection - Normal - CameraLR V9 - Improve", "status": "success", "time": "2026-06-22 20:35:26", "returncode": 0}
-{"project": "AUDI_FINAL - Object Detection - Camera6-Top-V7", "status": "success", "time": "2026-06-25 10:47:58", "returncode": 0}
-{"project": "AUDI_FINAL - Object_Detection - Camera1-Right-V7", "status": "success", "time": "2026-06-25 11:44:43", "returncode": 0}
-{"project": "AUDI_FINAL - Object_Detection - Camera3-RightOn-V7", "status": "success", "time": "2026-06-25 12:38:19", "returncode": 0}
-{"project": "AUDI_FINAL - Object_Detection - Camera4-LeftOn-V7", "status": "success", "time": "2026-06-25 13:34:23", "returncode": 0}
-{"project": "AUDI_FINAL - Object_Detection - Camera2-Left-V7", "status": "success", "time": "2026-06-25 14:53:31", "returncode": 0}
-{"project": "AUDI_FINAL - Object_Detection - Camera1-Right-V8", "status": "success", "time": "2026-06-25 18:21:42", "returncode": 0}
-{"project": "AUDI_FINAL - Object_Detection - Camera1-Right-V8", "status": "success", "time": "2026-06-25 23:42:38", "returncode": 0}
-{"project": "AUDI_FINAL - Object_Detection - Camera2-Left-V8", "status": "failed", "time": "2026-06-26 10:11:23", "returncode": -998}
-{"project": "AUDI_FINAL - Object_Detection - Camera1-Right-V8", "status": "success", "time": "2026-06-26 11:54:31", "returncode": 0}
-{"project": "AUDI_FINAL - Object_Detection - Camera1-Right-V8", "status": "success", "time": "2026-06-26 12:54:32", "returncode": 0}
-{"project": "AUDI_FINAL - Object_Detection - Camera2-Left-V8", "status": "failed", "time": "2026-06-26 12:54:32", "returncode": -998}
-{"project": "AUDI_FINAL - Object_Detection - Camera2-Left-V8", "status": "success", "time": "2026-06-26 15:09:09", "returncode": 0}
-{"project": "AUDI_FINAL - Object Detection - Camera5-Bottom-V8", "status": "success", "time": "2026-06-26 16:12:09", "returncode": 0}
-{"project": "AUDI_FINAL - Object_Detection - Camera4-LeftOn-V7", "status": "success", "time": "2026-06-26 17:22:36", "returncode": 0}
-{"project": "AUDI_FINAL - Object_Detection - Camera3-RightOn-V7", "status": "success", "time": "2026-06-26 18:18:13", "returncode": 0}
-{"project": "AUDI_FINAL - Object Detection - Camera6-Top-V8", "status": "success", "time": "2026-06-26 19:23:57", "returncode": 0}
-{"project": "AUDI_FINAL - Object_Detection - Camera4-LeftOn-V7", "status": "success", "time": "2026-06-27 00:17:11", "returncode": 0}
-{"project": "AUDI_FINAL - Object_Detection - Camera3-RightOn-V7", "status": "success", "time": "2026-06-27 01:10:30", "returncode": 0}
-{"project": "AUDI_FINAL - Object_Detection - Camera2-Left-V8", "status": "success", "time": "2026-06-27 02:26:25", "returncode": 0}
-{"project": "AUDI_FINAL - Object_Detection - Camera1-Right-V8", "status": "success", "time": "2026-06-27 03:23:59", "returncode": 0}
-{"project": "AUDI_FINAL - Object Detection - Camera6-Top-V8", "status": "success", "time": "2026-06-27 04:18:35", "returncode": 0}
-{"project": "AUDI_FINAL - Object Detection - Camera5-Bottom-V8", "status": "success", "time": "2026-06-27 05:10:01", "returncode": 0}
-{"project": "AUDI_FINAL - Object Detection - Camera5-Bottom-V8", "status": "success", "time": "2026-06-27 12:46:59", "returncode": 0}
-{"project": "AUDI_FINAL - Object_Detection - Camera4-LeftOn-V7", "status": "success", "time": "2026-06-27 14:02:36", "returncode": 0}
-{"project": "AUDI_FINAL - Object Detection - Camera6-Top-V8", "status": "success", "time": "2026-06-27 15:03:37", "returncode": 0}
+{"project": "3DC1101 - Object Detection - Normal - CameraBottom V2", "status": "success", "time": "2026-09-12 12:21:16", "returncode": 0}
+{"project": "3DC1106 - Object Detection - Normal - CameraTop V1", "status": "success", "time": "2026-09-13 11:33:27", "returncode": 0}
+{"project": "3DC1102 - Object Detection -Normal - CameraTop V6", "status": "success", "time": "2026-09-13 15:47:19", "returncode": 0}
+{"project": "3DC1102 - Object Detection -Normal - CameraBottom V6", "status": "success", "time": "2026-09-13 18:35:32", "returncode": 0}
+{"project": "3DC1102 - Object Detection -Normal - CameraInSideOutSide - V6", "status": "success", "time": "2026-09-14 06:39:20", "returncode": 0}
+{"project": "3DC1108 - Object Detection - Hella Twist - CameraLR V1", "status": "success", "time": "2026-09-14 12:43:25", "returncode": 0}
+{"project": "326 - Object Detection - CameraBot - V10", "status": "success", "time": "2026-09-14 14:03:47", "returncode": 0}
+{"project": "3DC1108 - Object Detection - Hella Twist - CameraBottom - V1", "status": "success", "time": "2026-09-14 14:55:07", "returncode": 0}
+{"project": "3DC1108 - Object Detection - Hella Twist - CameraTop V1", "status": "success", "time": "2026-09-15 18:18:05", "returncode": 0}
+{"project": "3DC1101 - Object Detection - Normal - CameraBottom V2", "status": "success", "time": "2026-09-15 18:18:26", "returncode": 0}
+{"project": "3DC1101 - Object Detection - CameraInsideOutside V2", "status": "success", "time": "2026-09-16 08:10:23", "returncode": 0}
+{"project": "3DC1101 - Object Detection - Normal - CameraBottom V2", "status": "success", "time": "2026-09-16 09:44:17", "returncode": 0}
+{"project": "3DC1108 - Object Detection - Hella Twist - CameraInsideOutside V1", "status": "success", "time": "2026-09-17 10:17:28", "returncode": 0}
+{"project": "3DC1108 - Object Detection - Hella Twist - CameraInsideOutside V1", "status": "success", "time": "2026-09-17 18:39:40", "returncode": 0}
+{"project": "3DC1109 - Object Detection - Drumcore - WD Z -V1", "status": "success", "time": "2026-09-18 16:09:51", "returncode": 0}
+{"project": "3DC1109 - Object Detection - Drumcore - WD Z -V1", "status": "success", "time": "2026-09-19 12:27:56", "returncode": 0}
+{"project": "3DC1101 - Object Detection - Normal - CameraBottom V2", "status": "success", "time": "2026-09-20 02:31:02", "returncode": 0}
+{"project": "3DC1109 - Object Detection - Drumcore - WD Z -V1", "status": "success", "time": "2026-09-20 03:56:36", "returncode": 0}
+{"project": "3DC1102 - Object Detection -Normal - CameraBottom V6", "status": "success", "time": "2026-09-21 13:17:41", "returncode": 0}
+{"project": "3DC1102 - Object Detection -Normal - CameraBottom V6", "status": "failed", "time": "2026-09-21 13:17:47", "returncode": 1}
+{"project": "3DC1102 - Object Detection -Normal - CameraTop V6", "status": "success", "time": "2026-09-21 17:48:58", "returncode": 0}
+{"project": "3DC1102 - Object Detection -Normal - CameraTop V6", "status": "failed", "time": "2026-09-21 17:49:03", "returncode": 1}
+{"project": "3DC1102 - Object Detection -Normal - CameraInSideOutSide - V6", "status": "success", "time": "2026-09-22 01:13:07", "returncode": 0}
+{"project": "3DC1102 - Object Detection -Normal - CameraInSideOutSide - V6", "status": "failed", "time": "2026-09-22 01:13:12", "returncode": 1}
+{"project": "3DC1102 - Object Detection -Normal - CameraBottom V6", "status": "success", "time": "2026-09-22 04:06:00", "returncode": 0}
+{"project": "3DC1102 - Object Detection -Normal - CameraBottom V6", "status": "failed", "time": "2026-09-22 04:06:03", "returncode": 1}
+{"project": "3DC1102 - Object Detection -Normal - CameraBottom V6", "status": "success", "time": "2026-09-22 09:44:21", "returncode": 0}
+{"project": "3DC1102 - Object Detection -Normal - CameraBottom V6", "status": "failed", "time": "2026-09-22 09:44:27", "returncode": 1}
+{"project": "3DC1108 - Object Detection - Hella Twist - CameraBottom - V1", "status": "success", "time": "2026-09-23 08:11:04", "returncode": 0}
+{"project": "3DC1108 - Object Detection - Hella Twist - CameraBottom - V1", "status": "failed", "time": "2026-09-23 08:11:09", "returncode": 1}
+{"project": "3DC1108 - Object Detection - Hella Twist - CameraInsideOutside V1", "status": "success", "time": "2026-09-23 18:27:18", "returncode": 0}
+{"project": "3DC1108 - Object Detection - Hella Twist - CameraInsideOutside V1", "status": "failed", "time": "2026-09-23 18:27:25", "returncode": 1}
+{"project": "3DC1108 - Object Detection - Hella Twist - CameraTop V1", "status": "success", "time": "2026-09-24 02:16:43", "returncode": 0}
+{"project": "3DC1108 - Object Detection - Hella Twist - CameraTop V1", "status": "failed", "time": "2026-09-24 02:16:48", "returncode": 1}
+{"project": "Midrange - VAS - Sideview V4", "status": "success", "time": "2026-09-24 10:37:24", "returncode": 0}
+{"project": "Midrange - VAS - Sideview V4", "status": "failed", "time": "2026-09-24 14:44:34", "returncode": 1}
+{"project": "3DC1102 - Object Detection -Normal - CameraBottom V6", "status": "failed", "time": "2026-10-08 16:19:17", "returncode": 1}
+{"project": "3DC1103 - Object Detection - Normal - CameraBottom V10 - Improve", "status": "failed", "time": "2026-10-08 19:09:02", "returncode": 1}
+{"project": "3DC1103 - Object Detection - Normal - CameraBottom V10 - Improve", "status": "failed", "time": "2026-10-13 17:57:53", "returncode": 1}
+{"project": "3DC1105 - Object Detection - CameraBottom V34 _Final", "status": "failed", "time": "2026-10-25 12:57:50", "returncode": 1}

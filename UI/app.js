@@ -11,6 +11,7 @@ let historyBootstrapped = false;
 let seenHistoryKeys = new Set();
 let labelingState = new Map();
 let lv2Verified = false;
+let lv3Verified = false;
 let lastLogProjectLoaded = '';
 let lastLogRefreshTs = 0;
 let logRefreshInFlight = false;
@@ -23,6 +24,12 @@ let pendingProjectDataUpload = '';
 let uploadProgressVisible = false;
 let sidePanelHidden = localStorage.getItem('train_monitor_side_panel_hidden') === '1';
 let queueRecoveryPromptShown = false;
+let openActionProject = '';
+let statePollPausedUntil = 0;
+let statePollPauseReason = '';
+let statePollResumeInFlight = false;
+let lastProjectListSignature = '';
+const STATE_POLL_PAUSE_TIMEOUT_MS = 20000;
 
 let sortState = {
     key: 'project',
@@ -52,9 +59,12 @@ const I18N = {
         train_monitor: 'Train monitor',
         scan_projects: 'QuĂ©t project',
         upload_project: 'Upload project (.zip)',
-        add_data_zip: 'Them data (.zip)',
+        add_data_zip: 'Them data',
         backup_project: 'Backup project',
         backup_selected: 'Backup da chon',
+        clear_selected_dataset: 'Xoa dataset da chon',
+        clear_selected_dataset_confirm: 'Ban chac chan muon xoa train, test, valid va data.yaml cua cac project da chon?',
+        clear_selected_dataset_title: 'Xoa dataset da chon',
         backup_starting: 'Dang bat dau backup...',
         backup_progress: 'Dang backup project...',
         backup_done: 'Backup hoan thanh',
@@ -63,8 +73,12 @@ const I18N = {
         backup_batch_progress: 'Dang backup project da chon...',
         backup_batch_done: 'Backup selected hoan thanh',
         train_selected: 'Train project Ä‘Ă£ chá»n',
-        download_success_outputs: 'Tai tat ca Output success',
+        download_selected_outputs: 'Tai best.pt project da chon',
         train_all: 'Train táº¥t cáº£',
+        quick_train_selected: 'Quick Train Selected Project',
+        quick_train_selected_confirm: 'Quick Train cac project da chon: clear dataset, tao dataset Train all data, roi dua vao queue train. Tiep tuc?',
+        quick_train_selected_progress: 'Quick Train selected project',
+        quick_train_selected_done: 'Quick Train selected da xu ly xong',
         retry_failed: 'Retry failed',
         clear_history: 'Xoa history',
         stop_queue: 'Stop queue',
@@ -187,12 +201,25 @@ const I18N = {
         delete_confirm: 'Ban chac chan muon xoa project nay?',
         clear_history_confirm: 'Ban chac chan muon xoa toan bo training history?',
         lv2_prompt: 'Nhap mat khau LV2:',
+        lv3_prompt: 'Nhap mat khau LV3:',
         modal_cancel: 'Cancel',
         modal_confirm: 'Confirm',
         lv2_title: 'LV2 verification',
+        lv3_title: 'LV3 verification',
         rename_title: 'Rename project',
         duplicate_title: 'Duplicate project',
         clear_history_title: 'Clear training history',
+        activity_log: 'Log nguoi dung',
+        activity_log_title: 'Lich su nguoi dung',
+        activity_log_empty: 'Chua co log trong phien nay',
+        restart_server: 'Restart server',
+        restart_server_confirm: 'Restart server script now?',
+        restart_server_done: 'Server dang restart. Hay reload lai sau vai giay.',
+        account_manager: 'Quan ly tai khoan',
+        account_username: 'Tai khoan',
+        account_password: 'Mat khau',
+        account_create: 'Tao tai khoan',
+        account_delete: 'Xoa',
         clear_dataset_title: 'Clear dataset',
         delete_project_title: 'Delete project',
         model_findings: 'Model findings',
@@ -246,6 +273,14 @@ const I18N = {
         train_finish_failed: 'Train tháº¥t báº¡i',
         edit_button: 'Edit',
         label_editor: 'Label editor',
+        quick_predict: 'Quick predict',
+        quick_train: 'Quick Train',
+        quick_train_confirm: 'Quick Train se clear dataset hien tai, tao dataset Train all data, roi dua project vao queue train. Tiep tuc?',
+        quick_train_clear: 'Quick Train: clear dataset',
+        quick_train_create: 'Quick Train: tao dataset Train all data',
+        quick_train_queue: 'Quick Train: dua vao queue',
+        quick_train_done: 'Quick Train da bat dau',
+        quick_train_failed: 'Quick Train that bai',
         load_images: 'Load áº£nh',
         image_list: 'Danh sĂ¡ch áº£nh',
         label_text: 'Ná»™i dung label (.txt)',
@@ -258,9 +293,23 @@ const I18N = {
         detail_tab_output: 'Output',
         detail_tab_metrics: 'Metrics',
         detail_tab_labels: 'Labels',
-        labels_panel_desc: 'Mo Label Editor hoac them data zip cho project nay.',
+        labels_panel_desc: 'Mo Label Editor hoac them anh/zip cho project nay.',
         open_label_editor: 'Mo Label Editor',
-        add_data_zip_button: 'Them data zip',
+        add_data_zip_button: 'Them data',
+        predict_unlabeled: 'Predict anh chua co label',
+        predict_model: 'Model',
+        predict_conf: 'Conf',
+        predict_iou: 'IoU',
+        predict_imgsz: 'Img size',
+        predict_device: 'Device',
+        predict_max_det: 'Max det',
+        predict_save_conf: 'Luu confidence',
+        predict_include_empty: 'Xu ly label rong',
+        predict_save_empty: 'Tao label rong neu khong detect',
+        predict_starting: 'Dang bat dau predict...',
+        predict_progress: 'Dang predict anh...',
+        predict_done: 'Predict hoan thanh',
+        unlabeled_images: 'Anh chua co label',
         continue_last_session_title: 'Phuc hoi session truoc',
         continue_last_session_message: 'Phat hien queue session truoc$PROJECTS$.\n\nBan muon tiep tuc hay bo qua?',
         continue_last_session_confirm: 'Continue last session',
@@ -282,9 +331,12 @@ const I18N = {
         train_monitor: 'Train monitor',
         scan_projects: 'Scan projects',
         upload_project: 'Upload project (.zip)',
-        add_data_zip: 'Add data (.zip)',
+        add_data_zip: 'Add data',
         backup_project: 'Backup project',
         backup_selected: 'Backup selected',
+        clear_selected_dataset: 'Clear selected dataset',
+        clear_selected_dataset_confirm: 'Are you sure you want to delete train, test, valid, and data.yaml for the selected projects?',
+        clear_selected_dataset_title: 'Clear selected dataset',
         backup_starting: 'Starting backup...',
         backup_progress: 'Backing up project...',
         backup_done: 'Backup completed',
@@ -293,8 +345,12 @@ const I18N = {
         backup_batch_progress: 'Backing up selected projects...',
         backup_batch_done: 'Selected backup completed',
         train_selected: 'Train selected projects',
-        download_success_outputs: 'Download success outputs',
+        download_selected_outputs: 'Download selected best.pt',
         train_all: 'Train all',
+        quick_train_selected: 'Quick Train Selected Project',
+        quick_train_selected_confirm: 'Quick Train selected projects: clear dataset, create Train all data dataset, then add them to the train queue. Continue?',
+        quick_train_selected_progress: 'Quick Train selected project',
+        quick_train_selected_done: 'Quick Train selected completed',
         retry_failed: 'Retry failed',
         clear_history: 'Clear history',
         stop_queue: 'Stop queue',
@@ -417,12 +473,25 @@ const I18N = {
         delete_confirm: 'Are you sure you want to delete this project?',
         clear_history_confirm: 'Are you sure you want to clear the entire training history?',
         lv2_prompt: 'Enter LV2 password:',
+        lv3_prompt: 'Enter LV3 password:',
         modal_cancel: 'Cancel',
         modal_confirm: 'Confirm',
         lv2_title: 'LV2 verification',
+        lv3_title: 'LV3 verification',
         rename_title: 'Rename project',
         duplicate_title: 'Duplicate project',
         clear_history_title: 'Clear training history',
+        activity_log: 'User log',
+        activity_log_title: 'User activity log',
+        activity_log_empty: 'No log in this session',
+        restart_server: 'Restart server',
+        restart_server_confirm: 'Restart server script now?',
+        restart_server_done: 'Server is restarting. Reload the page in a few seconds.',
+        account_manager: 'Account manager',
+        account_username: 'Username',
+        account_password: 'Password',
+        account_create: 'Create account',
+        account_delete: 'Delete',
         clear_dataset_title: 'Clear dataset',
         delete_project_title: 'Delete project',
         model_findings: 'Model findings',
@@ -476,6 +545,14 @@ const I18N = {
         train_finish_failed: 'Training failed',
         edit_button: 'Edit',
         label_editor: 'Label editor',
+        quick_predict: 'Quick predict',
+        quick_train: 'Quick Train',
+        quick_train_confirm: 'Quick Train will clear the current dataset, create a Train all data dataset, then add this project to the train queue. Continue?',
+        quick_train_clear: 'Quick Train: clear dataset',
+        quick_train_create: 'Quick Train: create Train all data dataset',
+        quick_train_queue: 'Quick Train: add to queue',
+        quick_train_done: 'Quick Train started',
+        quick_train_failed: 'Quick Train failed',
         load_images: 'Load images',
         image_list: 'Image list',
         label_text: 'Label text (.txt)',
@@ -488,9 +565,23 @@ const I18N = {
         detail_tab_output: 'Output',
         detail_tab_metrics: 'Metrics',
         detail_tab_labels: 'Labels',
-        labels_panel_desc: 'Open Label Editor or import a data zip for this project.',
+        labels_panel_desc: 'Open Label Editor or import images/zip for this project.',
         open_label_editor: 'Open Label Editor',
-        add_data_zip_button: 'Add data zip',
+        add_data_zip_button: 'Add data',
+        predict_unlabeled: 'Predict unlabeled images',
+        predict_model: 'Model',
+        predict_conf: 'Conf',
+        predict_iou: 'IoU',
+        predict_imgsz: 'Image size',
+        predict_device: 'Device',
+        predict_max_det: 'Max det',
+        predict_save_conf: 'Save confidence',
+        predict_include_empty: 'Include empty labels',
+        predict_save_empty: 'Write empty label if no detection',
+        predict_starting: 'Starting prediction...',
+        predict_progress: 'Predicting images...',
+        predict_done: 'Prediction completed',
+        unlabeled_images: 'Unlabeled images',
         continue_last_session_title: 'Restore previous session',
         continue_last_session_message: 'A previous queue session was found$PROJECTS$.\n\nDo you want to continue it or ignore it?',
         continue_last_session_confirm: 'Continue last session',
@@ -528,6 +619,63 @@ function updateSortIndicators() {
     statusEl.textContent = sortState.key === 'status'
         ? (sortState.dir === 'asc' ? '^' : 'v')
         : '<->';
+}
+
+function toggleProjectActionMenu(event, encodedName) {
+    if (event) {
+        event.preventDefault();
+        event.stopPropagation();
+    }
+    const name = decodeURIComponent(encodedName || '');
+    openActionProject = openActionProject === name ? '' : name;
+    if (openActionProject) {
+        pauseStatePolling('action_menu', STATE_POLL_PAUSE_TIMEOUT_MS);
+    } else {
+        resumeStatePolling('action_menu_closed', true);
+    }
+    syncProjectActionMenuDom();
+}
+
+function closeProjectActionMenu() {
+    if (!openActionProject) return;
+    openActionProject = '';
+    syncProjectActionMenuDom();
+    resumeStatePolling('action_menu_closed', true);
+}
+
+function syncProjectActionMenuDom() {
+    document.querySelectorAll('.action-wrap[data-project]').forEach(el => {
+        el.classList.toggle('open', String(el.dataset.project || '') === openActionProject);
+    });
+}
+
+function renderQueueList(queue = []) {
+    if (!Array.isArray(queue) || queue.length === 0) {
+        return `<div class="muted-box">${t('queue_empty')}</div>`;
+    }
+
+    return queue.map((item, index) => {
+        const encodedName = encodeURIComponent(item.name || '');
+        const upDisabled = index === 0 ? 'disabled' : '';
+        const downDisabled = index >= queue.length - 1 ? 'disabled' : '';
+        return `
+            <div class="queue-item">
+                <div class="queue-main">
+                    <div class="queue-head">
+                        <div class="queue-order">${item.order}</div>
+                    </div>
+                    <div>
+                        <div class="small">${t('queue_order')}</div>
+                        <b>${escapeHtml(item.name)}</b>
+                    </div>
+                    <div class="queue-actions">
+                        <button class="queue-priority-btn" ${upDisabled} onclick="reorderQueueProject('${encodedName}', 'up')" title="Priority up">↑</button>
+                        <button class="queue-priority-btn" ${downDisabled} onclick="reorderQueueProject('${encodedName}', 'down')" title="Priority down">↓</button>
+                    </div>
+                </div>
+            </div>
+        `;
+    }).join('');
 }
 
 function updateHeroSubtitle(projectName = '') {
@@ -728,8 +876,86 @@ async function ensureLv2() {
     }
 }
 
+async function ensureLv3() {
+    if (lv3Verified) return true;
+
+    const password = await showInputDialog({
+        title: t('lv3_title'),
+        message: t('lv3_prompt'),
+        confirmText: t('modal_confirm'),
+        cancelText: t('modal_cancel'),
+        confirmClass: 'btn-primary',
+        input: {
+            type: 'password',
+            value: '',
+            autocomplete: 'current-password'
+        }
+    });
+    if (password === null) return false;
+
+    try {
+        const data = await apiGet('/api/lv3/verify', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ password })
+        });
+        lv3Verified = !!(data && data.ok);
+        return lv3Verified;
+    } catch (e) {
+        alert(msg(String(e), 'LV3 verify failed'));
+        return false;
+    }
+}
+
 function sleep(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+function pauseStatePolling(reason = 'user_action', timeoutMs = STATE_POLL_PAUSE_TIMEOUT_MS) {
+    statePollPausedUntil = Math.max(
+        statePollPausedUntil,
+        Date.now() + Math.max(250, Number(timeoutMs) || STATE_POLL_PAUSE_TIMEOUT_MS)
+    );
+    statePollPauseReason = String(reason || 'user_action');
+}
+
+function isStatePollingPaused() {
+    if (!statePollPausedUntil) return false;
+    if (Date.now() >= statePollPausedUntil) {
+        statePollPausedUntil = 0;
+        statePollPauseReason = '';
+        return false;
+    }
+    return true;
+}
+
+function getStatePollPauseRemainingMs() {
+    if (!isStatePollingPaused()) return 0;
+    return Math.max(0, statePollPausedUntil - Date.now());
+}
+
+async function resumeStatePolling(reason = '', refresh = true) {
+    statePollPausedUntil = 0;
+    statePollPauseReason = '';
+    if (!refresh || statePollResumeInFlight) return;
+    statePollResumeInFlight = true;
+    try {
+        const stateData = await apiGet('/api/state');
+        await refreshData(stateData, { preserveScroll: true, lightweight: true });
+    } catch (e) {
+        console.error(e);
+    } finally {
+        statePollResumeInFlight = false;
+    }
+}
+
+async function withStatePollingPaused(reason, fn, timeoutMs = STATE_POLL_PAUSE_TIMEOUT_MS) {
+    pauseStatePolling(reason, timeoutMs);
+    try {
+        return await fn();
+    } finally {
+        await resumeStatePolling(`${reason}_done`, true);
+    }
 }
 
 function ensureToastContainer() {
@@ -835,6 +1061,103 @@ function escapeAttr(text) {
     return escapeHtml(text).replaceAll('`', '&#096;');
 }
 
+function renderProjectNoteCell(projectName, note) {
+    const encodedProjectName = encodeURIComponent(projectName);
+    const value = escapeHtml(note || '');
+    const attrValue = escapeAttr(note || '');
+    return `
+        <div class="project-note-wrap">
+            <textarea
+                class="project-note-input"
+                rows="1"
+                data-saved-value="${attrValue}"
+                maxlength="500"
+                placeholder="Note..."
+                onkeydown="onProjectNoteKeyDown(event, '${encodedProjectName}')"
+                onfocus="pauseStatePolling('note_focus', STATE_POLL_PAUSE_TIMEOUT_MS)"
+                onblur="resumeStatePolling('note_blur', true)"
+                oninput="onProjectNoteInput(event)"
+                onclick="event.stopPropagation()"
+            >${value}</textarea>
+            <button
+                class="btn-light btn-mini note-clear-btn"
+                type="button"
+                title="Clear note"
+                onclick="clearProjectNote(event, '${encodedProjectName}')"
+            >x</button>
+        </div>
+    `;
+}
+
+function autoResizeProjectNote(input) {
+    if (!input) return;
+    input.style.height = 'auto';
+    input.style.height = `${Math.max(30, input.scrollHeight)}px`;
+}
+
+function autoResizeProjectNotes(root = document) {
+    root.querySelectorAll?.('.project-note-input').forEach(autoResizeProjectNote);
+}
+
+function onProjectNoteInput(event) {
+    pauseStatePolling('note_input', STATE_POLL_PAUSE_TIMEOUT_MS);
+    autoResizeProjectNote(event.currentTarget);
+}
+
+async function saveProjectNote(encodedProjectName, inputEl) {
+    const project = decodeURIComponent(encodedProjectName);
+    const input = inputEl || null;
+    const note = input ? String(input.value || '') : '';
+    pauseStatePolling('note_save', STATE_POLL_PAUSE_TIMEOUT_MS);
+    try {
+        if (input) input.disabled = true;
+        const data = await apiGet('/api/project/note', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({project, note}),
+        });
+        if (input) {
+            input.value = data.note || '';
+            input.dataset.savedValue = data.note || '';
+            autoResizeProjectNote(input);
+            const row = input.closest('tr');
+            if (row) row.classList.toggle('has-note', !!String(data.note || '').trim());
+        }
+        if (latestStateData && Array.isArray(latestStateData.projects)) {
+            const item = latestStateData.projects.find(x => x.name === project);
+            if (item) item.note = data.note || '';
+        }
+    } catch (e) {
+        alert(e.message || 'Save note failed');
+        if (input && input.dataset.savedValue !== undefined) {
+            input.value = input.dataset.savedValue || '';
+            autoResizeProjectNote(input);
+        }
+    } finally {
+        if (input) input.disabled = false;
+        resumeStatePolling('note_saved', true);
+    }
+}
+
+function onProjectNoteKeyDown(event, encodedProjectName) {
+    event.stopPropagation();
+    if (event.key !== 'Enter') return;
+    event.preventDefault();
+    saveProjectNote(encodedProjectName, event.currentTarget);
+    event.currentTarget.blur();
+}
+
+function clearProjectNote(event, encodedProjectName) {
+    event.preventDefault();
+    event.stopPropagation();
+    const wrap = event.currentTarget.closest('.project-note-wrap');
+    const input = wrap ? wrap.querySelector('.project-note-input') : null;
+    if (!input) return;
+    input.value = '';
+    autoResizeProjectNote(input);
+    saveProjectNote(encodedProjectName, input);
+}
+
 let modalSearchLockState = null;
 
 function lockSearchInputForModal() {
@@ -875,6 +1198,7 @@ function showModalDialog({
     const inputPlaceholder = escapeAttr(input?.placeholder || '');
     const inputAutocomplete = escapeAttr(input?.autocomplete || 'off');
     const modalInputName = `webModalInput_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    pauseStatePolling('modal_open', STATE_POLL_PAUSE_TIMEOUT_MS);
     lockSearchInputForModal();
 
     return new Promise((resolve) => {
@@ -930,6 +1254,7 @@ function showModalDialog({
             document.removeEventListener('keydown', onKeyDown, true);
             host.innerHTML = '';
             unlockSearchInputForModal();
+            resumeStatePolling('modal_close', true);
             resolve(result);
         };
 
@@ -1168,15 +1493,18 @@ function filterProjects(projects) {
 }
 
 function shouldUseLightweightProjectRefresh(nextStateData) {
-    if (expandedProjects.size === 0) return false;
-    if (searchQuery || statusFilter !== 'all') return false;
+    const body = document.getElementById('projectTableBody');
+    if (!body) return false;
 
-    const prevProjects = Array.isArray(latestStateData?.projects) ? latestStateData.projects : [];
-    const nextProjects = Array.isArray(nextStateData?.projects) ? nextStateData.projects : [];
-    if (prevProjects.length !== nextProjects.length) return false;
+    const existingRows = Array.from(body.querySelectorAll('input.project-check'))
+        .map(input => String(input.value || ''));
+    if (!existingRows.length) return false;
 
-    for (let i = 0; i < prevProjects.length; i += 1) {
-        if (String(prevProjects[i]?.name || '') !== String(nextProjects[i]?.name || '')) {
+    const nextProjects = filterProjects(sortProjects(Array.isArray(nextStateData?.projects) ? nextStateData.projects : []));
+    if (existingRows.length !== nextProjects.length) return false;
+
+    for (let i = 0; i < existingRows.length; i += 1) {
+        if (existingRows[i] !== String(nextProjects[i]?.name || '')) {
             return false;
         }
     }
@@ -1236,18 +1564,95 @@ async function ensureProjectDetailLoaded(projectName) {
     }
 }
 
+function findProjectRow(projectName) {
+    const input = document.querySelector(`input.project-check[value="${CSS.escape(projectName)}"]`);
+    return input ? input.closest('tr') : null;
+}
+
+function updateProjectDetailRow(projectName) {
+    const row = findProjectRow(projectName);
+    if (!row) return;
+
+    let detailRow = row.nextElementSibling;
+    if (!detailRow || !detailRow.classList.contains('detail-row')) {
+        detailRow = document.createElement('tr');
+        detailRow.className = 'detail-row';
+        row.insertAdjacentElement('afterend', detailRow);
+    }
+    detailRow.innerHTML = `<td colspan="10">${renderProjectDetailContent(projectName)}</td>`;
+}
+
+async function refreshProjectAfterDataChange(projectName, options = {}) {
+    let project = String(projectName || '');
+    try {
+        project = decodeURIComponent(project);
+    } catch (e) {
+        // keep original project text
+    }
+    const keepExpanded = options.keepExpanded !== false;
+    if (project) {
+        projectDetailCache.delete(project);
+        if (keepExpanded) {
+            expandedProjects.add(project);
+        }
+        await ensureProjectDetailLoaded(project);
+    }
+    await refreshData(null, { preserveScroll: true, lightweight: false });
+}
+
+async function refreshProjectsAfterDataChange(projectNames = [], options = {}) {
+    const keepExpanded = options.keepExpanded !== false;
+    const projects = [];
+    for (const item of projectNames || []) {
+        let project = String(item || '');
+        try {
+            project = decodeURIComponent(project);
+        } catch (e) {
+            // keep original project text
+        }
+        if (project && !projects.includes(project)) {
+            projects.push(project);
+        }
+    }
+
+    for (const project of projects) {
+        projectDetailCache.delete(project);
+        if (keepExpanded && expandedProjects.has(project)) {
+            await ensureProjectDetailLoaded(project);
+        }
+    }
+
+    await refreshData(null, { preserveScroll: true, lightweight: false });
+}
+
 function toggleProjectDetail(encodedName) {
     const projectName = decodeURIComponent(encodedName);
+    pauseStatePolling('project_expand', STATE_POLL_PAUSE_TIMEOUT_MS);
 
     if (expandedProjects.has(projectName)) {
         expandedProjects.delete(projectName);
-        refreshData(latestStateData || undefined);
+        const row = findProjectRow(projectName);
+        const icon = row?.querySelector('.expand-icon');
+        if (icon) icon.textContent = '>';
+        const detailRow = row?.nextElementSibling;
+        if (detailRow?.classList.contains('detail-row')) {
+            detailRow.remove();
+        } else {
+            refreshData(latestStateData || undefined);
+        }
+        resumeStatePolling('project_collapse', true);
         return;
     }
 
     expandedProjects.add(projectName);
-    ensureProjectDetailLoaded(projectName).then(() => refreshData(latestStateData || undefined));
-    refreshData(latestStateData || undefined);
+    const row = findProjectRow(projectName);
+    const icon = row?.querySelector('.expand-icon');
+    if (icon) icon.textContent = 'v';
+    updateProjectDetailRow(projectName);
+    ensureProjectDetailLoaded(projectName).then(() => {
+        updateProjectDetailRow(projectName);
+        resumeStatePolling('project_expand_loaded', true);
+    });
 }
 
 function renderInsightCards(items = []) {
@@ -1288,8 +1693,15 @@ function getProjectDetailTab(projectName) {
 
 function setProjectDetailTab(encodedName, tabKey = 'dataset') {
     const projectName = decodeURIComponent(String(encodedName || ''));
+    pauseStatePolling('detail_tab', STATE_POLL_PAUSE_TIMEOUT_MS);
     detailTabState.set(projectName, String(tabKey || 'dataset'));
+    if (expandedProjects.has(projectName)) {
+        updateProjectDetailRow(projectName);
+        resumeStatePolling('detail_tab_done', false);
+        return;
+    }
     refreshData(latestStateData || undefined);
+    resumeStatePolling('detail_tab_done', true);
 }
 
 function getDatasetDraft(projectName, fallback = {}) {
@@ -1313,29 +1725,37 @@ function toggleRunDetail(encodedProjectName, encodedRunFolder) {
     const projectName = decodeURIComponent(String(encodedProjectName || ''));
     const runFolder = decodeURIComponent(String(encodedRunFolder || ''));
     const runKey = `${projectName}::${runFolder}`;
+    pauseStatePolling('run_detail_toggle', STATE_POLL_PAUSE_TIMEOUT_MS);
     runDetailExpandedState.set(runKey, !isRunDetailExpanded(runKey));
-    refreshData(latestStateData || undefined);
+    updateProjectDetailRow(projectName);
+    resumeStatePolling('run_detail_toggle_done', false);
 }
 
 function setRunConfusionClassFilter(projectName, runKey, className = '') {
+    pauseStatePolling('run_confusion_filter', STATE_POLL_PAUSE_TIMEOUT_MS);
     const state = getRunConfusionViewState(runKey);
     state.className = decodeURIComponent(String(className || ''));
     state.predClassName = '';
-    refreshData(latestStateData || undefined);
+    updateProjectDetailRow(projectName);
+    resumeStatePolling('run_confusion_filter_done', false);
 }
 
 function setRunConfusionTopN(projectName, runKey, topN) {
+    pauseStatePolling('run_confusion_topn', STATE_POLL_PAUSE_TIMEOUT_MS);
     const state = getRunConfusionViewState(runKey);
     const value = String(topN || '10').toLowerCase();
     state.topN = value === 'all' ? 'all' : Math.max(1, Number(topN || 10));
-    refreshData(latestStateData || undefined);
+    updateProjectDetailRow(projectName);
+    resumeStatePolling('run_confusion_topn_done', false);
 }
 
 function setRunConfusionPairFilter(projectName, runKey, gtClassName = '', predClassName = '') {
+    pauseStatePolling('run_confusion_pair', STATE_POLL_PAUSE_TIMEOUT_MS);
     const state = getRunConfusionViewState(runKey);
     state.className = decodeURIComponent(String(gtClassName || ''));
     state.predClassName = decodeURIComponent(String(predClassName || ''));
-    refreshData(latestStateData || undefined);
+    updateProjectDetailRow(projectName);
+    resumeStatePolling('run_confusion_pair_done', false);
 }
 
 function renderProjectDetailContent(projectName) {
@@ -1390,6 +1810,16 @@ function renderProjectDetailContent(projectName) {
             </div>
         `
         : `<div class="muted-box">${data.output_folder_exists ? t('no_weights_files') : t('no_output_folder')}</div>`;
+    const predictWeightOptions = Array.isArray(data.weight_files)
+        ? data.weight_files.filter(file => String(file.file_name || '').toLowerCase().endsWith('.pt'))
+        : [];
+    const predictModelOptionsHtml = predictWeightOptions.length > 0
+        ? predictWeightOptions.map((file, index) => `
+            <option value="${escapeAttr(file.relative_path)}" ${index === 0 ? 'selected' : ''}>
+                ${escapeHtml(file.run_folder)} / ${escapeHtml(file.file_name)} | ${escapeHtml(file.modified_at || '-')}
+            </option>
+        `).join('')
+        : '';
 
     const runDetailsHtml = (data.run_details && data.run_details.length > 0)
         ? data.run_details.map(run => {
@@ -1783,223 +2213,6 @@ function renderProjectDetailContent(projectName) {
         </div>
     `;
 
-    const testingTabHtml = (data.run_details && data.run_details.length > 0)
-        ? data.run_details.map(run => {
-            const testing = run.model_testing || {};
-            const testingCsv = testing.results_csv || {};
-            const testingSummary = testingCsv.summary || {};
-            const testingConfusion = testing.confusion_analysis || {};
-            const topErrorClasses = Array.isArray(testingConfusion.top_error_classes) ? testingConfusion.top_error_classes : [];
-            const topConfusions = Array.isArray(testingConfusion.top_confusions) ? testingConfusion.top_confusions : [];
-            const sampleItems = Array.isArray(testingConfusion.sample_items) ? testingConfusion.sample_items : [];
-            const exportFiles = Array.isArray(testing.export_files) ? testing.export_files : [];
-            const summaryCounts = testing.summary_counts || {};
-
-            return `
-                <div class="detail-box detail-box-full">
-                    <div class="detail-title">${t('model_testing')} | ${escapeHtml(run.run_folder)}</div>
-                    <div class="detail-actions mb8">
-                        <button class="btn-primary btn-mini" onclick="runModelTesting('${encodeURIComponent(projectName)}', '${encodeURIComponent(run.run_folder)}')">${t('run_model_testing')}</button>
-                        <button class="btn-success btn-mini" onclick="showMsaSampleUpload('${encodeURIComponent(projectName)}', '${encodeURIComponent(run.run_folder)}')">MSA Sample Test</button>
-                    </div>
-                    ${testing.exists ? `
-                        <div class="detail-stats mb8">
-                            <div class="detail-stat-item">
-                                <div class="detail-stat-label">${t('testing_valid_images')}</div>
-                                <div class="detail-stat-value">${escapeHtml(summaryCounts.valid_sample_images ?? 0)}</div>
-                            </div>
-                            <div class="detail-stat-item">
-                                <div class="detail-stat-label">${t('testing_misclassified_images')}</div>
-                                <div class="detail-stat-value">${escapeHtml(summaryCounts.misclassified_sample_images ?? 0)}</div>
-                            </div>
-                            <div class="detail-stat-item">
-                                <div class="detail-stat-label">${t('testing_correct_objects')}</div>
-                                <div class="detail-stat-value">${escapeHtml(summaryCounts.total_correct_objects ?? 0)}</div>
-                            </div>
-                            <div class="detail-stat-item">
-                                <div class="detail-stat-label">${t('testing_error_objects')}</div>
-                                <div class="detail-stat-value">${escapeHtml(summaryCounts.total_error_objects ?? 0)}</div>
-                            </div>
-                            <div class="detail-stat-item">
-                                <div class="detail-stat-label">mAP50-95</div>
-                                <div class="detail-stat-value">${escapeHtml(testingSummary.map5095 ?? '-')}</div>
-                            </div>
-                            <div class="detail-stat-item">
-                                <div class="detail-stat-label">Precision / Recall</div>
-                                <div class="detail-stat-value">${escapeHtml(testingSummary.precision ?? '-')} | ${escapeHtml(testingSummary.recall ?? '-')}</div>
-                            </div>
-                        </div>
-                        <div class="output-list mb8">
-                            <div class="detail-title">${t('model_testing_results')}</div>
-                            <table class="output-table">
-                                <thead>
-                                    <tr>
-                                        <th>${t('testing_metric')}</th>
-                                        <th>${t('testing_value')}</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    <tr>
-                                        <td>${t('testing_valid_images')}</td>
-                                        <td>${escapeHtml(summaryCounts.valid_sample_images ?? 0)}</td>
-                                    </tr>
-                                    <tr>
-                                        <td>${t('testing_misclassified_images')}</td>
-                                        <td>${escapeHtml(summaryCounts.misclassified_sample_images ?? 0)}</td>
-                                    </tr>
-                                    <tr>
-                                        <td>${t('testing_correct_objects')}</td>
-                                        <td>${escapeHtml(summaryCounts.total_correct_objects ?? 0)}</td>
-                                    </tr>
-                                    <tr>
-                                        <td>${t('testing_error_objects')}</td>
-                                        <td>${escapeHtml(summaryCounts.total_error_objects ?? 0)}</td>
-                                    </tr>
-                                    <tr>
-                                        <td>mAP50-95</td>
-                                        <td>${escapeHtml(testingSummary.map5095 ?? '-')}</td>
-                                    </tr>
-                                    <tr>
-                                        <td>Precision</td>
-                                        <td>${escapeHtml(testingSummary.precision ?? '-')}</td>
-                                    </tr>
-                                    <tr>
-                                        <td>Recall</td>
-                                        <td>${escapeHtml(testingSummary.recall ?? '-')}</td>
-                                    </tr>
-                                </tbody>
-                            </table>
-                        </div>
-                        ${exportFiles.length > 0 ? `
-                            <div class="detail-title">${t('model_testing_exports')}</div>
-                            <div class="detail-actions mb8">
-                                ${exportFiles.map(file => `
-                                    <a
-                                        class="download-link"
-                                        href="/api/output_file?project=${encodeURIComponent(projectName)}&rel=${encodeURIComponent(file.relative_path)}"
-                                        download
-                                    >${escapeHtml(file.name)}</a>
-                                `).join('')}
-                            </div>
-                        ` : ''}
-                        ${topErrorClasses.length > 0 ? `
-                            <div class="output-list mb8">
-                                <div class="detail-title">${t('error_by_class')}</div>
-                                <table class="output-table">
-                                <thead>
-                                    <tr>
-                                        <th>Class</th>
-                                        <th>${t('error_rate')}</th>
-                                        <th>${t('correct_count')}</th>
-                                        <th>${t('wrong_class_count')}</th>
-                                        <th>${t('missed_bg_count')}</th>
-                                        <th>Errors</th>
-                                        <th>Total</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                        ${topErrorClasses.map(row => `
-                                            <tr>
-                                                <td>${escapeHtml(row.gt_class_name ?? '-')}</td>
-                                                <td>${escapeHtml(((Number(row.error_rate || 0)) * 100).toFixed(2))}%</td>
-                                                <td>${escapeHtml(row.correct ?? 0)}</td>
-                                                <td>${escapeHtml(row.mis_as_other_classes ?? 0)}</td>
-                                                <td>${escapeHtml(row.missed_as_background ?? 0)}</td>
-                                                <td>${escapeHtml(row.total_errors ?? 0)}</td>
-                                                <td>${escapeHtml(row.gt_total ?? 0)}</td>
-                                            </tr>
-                                        `).join('')}
-                                    </tbody>
-                                </table>
-                            </div>
-                        ` : ''}
-                        ${topConfusions.length > 0 ? `
-                            <div class="output-list mb8">
-                                <div class="detail-title">${t('confusion_pairs')}</div>
-                                <table class="output-table">
-                                    <thead>
-                                        <tr>
-                                            <th>GT class</th>
-                                            <th>${t('confused_with')}</th>
-                                            <th>${t('error_rate')}</th>
-                                            <th>Count</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        ${topConfusions.map(row => `
-                                            <tr>
-                                                <td>${escapeHtml(row.gt_class_name ?? '-')}</td>
-                                                <td>${escapeHtml(row.pred_class_name ?? '-')}</td>
-                                                <td>${escapeHtml(((Number(row.rate_over_gt || 0)) * 100).toFixed(2))}%</td>
-                                                <td>${escapeHtml(row.count ?? 0)}</td>
-                                            </tr>
-                                        `).join('')}
-                                    </tbody>
-                                </table>
-                            </div>
-                        ` : ''}
-                        ${sampleItems.length > 0 ? `
-                            <div class="detail-box detail-box-full mb8">
-                                <div class="detail-title">${t('misclassified_samples')}</div>
-                                <div class="run-image-grid">
-                                    ${sampleItems.map(item => `
-                                        <div class="run-image-card">
-                                            <a class="run-image-preview-link" href="/api/output_file?project=${encodeURIComponent(projectName)}&rel=${encodeURIComponent(item.relative_path)}" target="_blank">
-                                                <img src="/api/output_file?project=${encodeURIComponent(projectName)}&rel=${encodeURIComponent(item.relative_path)}" alt="${escapeHtml(item.image_name)}">
-                                            </a>
-                                            <div class="run-image-name">
-                                                <div>${escapeHtml(item.gt_class_name || '-')} -> ${escapeHtml(item.pred_class_name || '-')}</div>
-                                                <div>${escapeHtml(item.image_name || '-')}</div>
-                                            </div>
-                                        </div>
-                                    `).join('')}
-                                </div>
-                            </div>
-                        ` : ''}
-                        ${run.msa_testing && run.msa_testing.exists ? `
-                            <div class="detail-box detail-box-full mb8" style="border: 2px solid #4CAF50;">
-                                <div class="detail-title">📊 MSA Sample Results</div>
-                                <div class="detail-stats mb8">
-                                    <div class="detail-stat-item">
-                                        <div class="detail-stat-label">Total Samples</div>
-                                        <div class="detail-stat-value">${run.msa_testing.results?.total_images || 0}</div>
-                                    </div>
-                                    <div class="detail-stat-item">
-                                        <div class="detail-stat-label">Incorrect</div>
-                                        <div class="detail-stat-value">${run.msa_testing.results?.wrong_images || 0}</div>
-                                    </div>
-                                    <div class="detail-stat-item">
-                                        <div class="detail-stat-label">Error Rate</div>
-                                        <div class="detail-stat-value" style="color: ${Number(run.msa_testing.results?.error_rate || 0) > 20 ? '#f44336' : '#4CAF50'};">${Number(run.msa_testing.results?.error_rate || 0).toFixed(2)}%</div>
-                                    </div>
-                                </div>
-                                <div class="run-image-grid">
-                                    ${(run.msa_testing.results?.sample_items || []).map(item => `
-                                        <div class="run-image-card">
-                                            <div style="display:flex; gap:4px; height:200px;">
-                                                <div style="flex:1; overflow:hidden; border-right:2px solid #ccc;">
-                                                    <img src="/api/output_file?project=${encodeURIComponent(projectName)}&rel=${encodeURIComponent(item.gt_vis_relative_path)}" alt="GT" style="width:100%; height:100%; object-fit:cover;">
-                                                    <div style="background:#e8f5e9; padding:4px; text-align:center; font-size:11px;">GT</div>
-                                                </div>
-                                                <div style="flex:1; overflow:hidden;">
-                                                    <img src="/api/output_file?project=${encodeURIComponent(projectName)}&rel=${encodeURIComponent(item.pred_vis_relative_path)}" alt="Pred" style="width:100%; height:100%; object-fit:cover;">
-                                                    <div style="background:#fff3e0; padding:4px; text-align:center; font-size:11px;">Pred</div>
-                                                </div>
-                                            </div>
-                                            <div class="run-image-name">
-                                                <div style="font-size:11px;">${item.status === 'wrong' ? '❌' : '✓'} ${escapeHtml(item.image_name)}</div>
-                                            </div>
-                                        </div>
-                                    `).join('')}
-                                </div>
-                            </div>
-                        ` : ''}
-                    ` : `<div class="muted-box">${t('no_model_testing')}</div>`}
-                </div>
-            `;
-        }).join('')
-        : `<div class="muted-box">${t('no_model_testing')}</div>`;
-
     const labelsTabHtml = `
         <div class="detail-box detail-box-full">
             <div class="detail-title">${t('label_editor')}</div>
@@ -2007,6 +2220,58 @@ function renderProjectDetailContent(projectName) {
             <div class="detail-actions">
                 <button class="btn-light btn-mini" onclick="openProjectEditor('${encodeURIComponent(projectName)}')">${t('open_label_editor')}</button>
                 <button class="btn-success btn-mini" onclick="openProjectDataUpload('${encodeURIComponent(projectName)}')">${t('add_data_zip_button')}</button>
+            </div>
+        </div>
+        <div class="detail-box detail-box-full">
+            <div class="detail-title">${t('predict_unlabeled')}</div>
+            <div class="detail-stats mb8">
+                <div class="detail-stat-item">
+                    <div class="detail-stat-label">${t('unlabeled_images')}</div>
+                    <div class="detail-stat-value">${escapeHtml(data.unlabeled_image_count ?? 0)}</div>
+                </div>
+                <div class="detail-stat-item">
+                    <div class="detail-stat-label">${t('predict_model')}</div>
+                    <div class="detail-stat-value">
+                        <select id="predictModel_${projectDomId(projectName)}" ${predictModelOptionsHtml ? '' : 'disabled'}>
+                            ${predictModelOptionsHtml || `<option value="">${escapeHtml(t('no_weights_files'))}</option>`}
+                        </select>
+                    </div>
+                </div>
+                <div class="detail-stat-item">
+                    <div class="detail-stat-label">${t('predict_conf')}</div>
+                    <div class="detail-stat-value"><input type="number" min="0" max="1" step="0.01" id="predictConf_${projectDomId(projectName)}" value="0.50"></div>
+                </div>
+                <div class="detail-stat-item">
+                    <div class="detail-stat-label">${t('predict_iou')}</div>
+                    <div class="detail-stat-value"><input type="number" min="0" max="1" step="0.01" id="predictIou_${projectDomId(projectName)}" value="0.65"></div>
+                </div>
+                <div class="detail-stat-item">
+                    <div class="detail-stat-label">${t('predict_imgsz')}</div>
+                    <div class="detail-stat-value"><input type="number" min="32" max="4096" step="32" id="predictImgsz_${projectDomId(projectName)}" value="640"></div>
+                </div>
+                <div class="detail-stat-item">
+                    <div class="detail-stat-label">${t('predict_device')}</div>
+                    <div class="detail-stat-value"><input type="text" id="predictDevice_${projectDomId(projectName)}" value="" placeholder="0 / cpu"></div>
+                </div>
+                <div class="detail-stat-item">
+                    <div class="detail-stat-label">${t('predict_max_det')}</div>
+                    <div class="detail-stat-value"><input type="number" min="1" max="10000" step="1" id="predictMaxDet_${projectDomId(projectName)}" value="300"></div>
+                </div>
+                <div class="detail-stat-item">
+                    <div class="detail-stat-label">${t('predict_save_conf')}</div>
+                    <div class="detail-stat-value"><input type="checkbox" id="predictSaveConf_${projectDomId(projectName)}"></div>
+                </div>
+                <div class="detail-stat-item">
+                    <div class="detail-stat-label">${t('predict_include_empty')}</div>
+                    <div class="detail-stat-value"><input type="checkbox" id="predictIncludeEmpty_${projectDomId(projectName)}"></div>
+                </div>
+                <div class="detail-stat-item">
+                    <div class="detail-stat-label">${t('predict_save_empty')}</div>
+                    <div class="detail-stat-value"><input type="checkbox" id="predictSaveEmpty_${projectDomId(projectName)}" checked></div>
+                </div>
+            </div>
+            <div class="detail-actions">
+                <button class="btn-primary btn-mini" onclick="runPredictUnlabeled('${encodeURIComponent(projectName)}')" ${predictModelOptionsHtml ? '' : 'disabled'}>${t('predict_unlabeled')}</button>
             </div>
         </div>
     `;
@@ -2023,7 +2288,9 @@ function renderProjectDetailContent(projectName) {
             <div class="detail-tab-panel ${activeTab === 'dataset' ? 'active' : ''}">${datasetTabHtml}</div>
             <div class="detail-tab-panel ${activeTab === 'output' ? 'active' : ''}">${outputTabHtml}</div>
             <div class="detail-tab-panel ${activeTab === 'metrics' ? 'active' : ''}">${metricsTabHtml}</div>
-            <div class="detail-tab-panel ${activeTab === 'testing' ? 'active' : ''}">${testingTabHtml}</div>
+            <div class="detail-tab-panel ${activeTab === 'testing' ? 'active' : ''}">
+                <div class="detail-actions mb8"><button class="btn-success btn-mini" onclick="window.open('/msa_testing?project=${encodeURIComponent(projectName)}', '_blank')">MSA Model Testing</button></div>
+            </div>
             <div class="detail-tab-panel ${activeTab === 'labels' ? 'active' : ''}">${labelsTabHtml}</div>
         </div>
     `;
@@ -2053,39 +2320,25 @@ async function saveDatasetConfig(encodedName) {
         body: JSON.stringify(payload)
     });
     datasetDraftState.set(projectName, { ...(data.config || payload) });
-    projectDetailCache.delete(projectName);
+    await refreshProjectAfterDataChange(projectName);
     alert(msg(data.message, 'OK'));
-    await ensureProjectDetailLoaded(projectName);
-    refreshData();
 }
 
 async function createDataset(encodedName) {
     const projectName = decodeURIComponent(encodedName);
     const payload = getDatasetConfigFromInputs(projectName);
-    let data;
-    if (payload.train_all_data) {
-        data = await runDatasetTask(
-            projectName,
-            '/api/project/merge_train_valid',
-            { project: projectName },
-            t('merge_train_valid')
-        );
-    } else {
-        data = await runDatasetTask(
-            projectName,
-            '/api/project/create_dataset',
-            {
-                ...payload,
-                split_mode: payload.split_by_class ? 'class' : 'count'
-            },
-            t('create_dataset')
-        );
-    }
-    projectDetailCache.delete(projectName);
+    const data = await runDatasetTask(
+        projectName,
+        '/api/project/create_dataset',
+        {
+            ...payload,
+            split_mode: payload.split_by_class ? 'class' : 'count'
+        },
+        payload.train_all_data ? t('merge_train_valid') : t('create_dataset')
+    );
     const counts = data.counts || {};
+    await refreshProjectAfterDataChange(projectName);
     alert(`${msg(data.message, 'OK')}\nTrain=${counts.train ?? 0}, Valid=${counts.valid ?? 0}, Test=${counts.test ?? 0}`);
-    await ensureProjectDetailLoaded(projectName);
-    refreshData();
 }
 
 function renderProjectProgress(progressValue, statusValue) {
@@ -2113,7 +2366,6 @@ async function refreshData(prefetchedData = null, options = {}) {
     const prevScrollY = preserveScroll ? window.scrollY : 0;
     const data = prefetchedData || await apiGet('/api/state');
     const logData = options.logData || null;
-    latestStateData = data;
     stateVersion = Math.max(stateVersion, Number(data.version || 0));
     processHistoryNotifications(data.history || []);
 
@@ -2125,14 +2377,20 @@ async function refreshData(prefetchedData = null, options = {}) {
 
     const allSortedProjects = sortProjects(data.projects || []);
     let renderedProjects = filterProjects(allSortedProjects);
+    const projectListSignature = allSortedProjects.map(p => String(p.name || '')).join('\n');
     document.getElementById('visibleCount').textContent = renderedProjects.length;
 
     const logProject = document.getElementById('logProject');
     const currentLogSelection = logProject.value;
 
     const body = document.getElementById('projectTableBody');
-    const canLightweightRender = lightweight
-        && !!body
+    const actionMenuOpen = !!openActionProject && !!body?.querySelector('.action-wrap.open');
+    if (actionMenuOpen && !shouldUseLightweightProjectRefresh(data)) {
+        latestStateData = data;
+        return;
+    }
+
+    const canLightweightRender = !!body
         && (!!body.querySelector('.project-check'))
         && shouldUseLightweightProjectRefresh(data);
 
@@ -2147,16 +2405,27 @@ async function refreshData(prefetchedData = null, options = {}) {
             if (cells[5]) cells[5].textContent = p.last_start || '-';
             if (cells[6]) cells[6].textContent = p.last_end || '-';
             if (cells[7]) cells[7].textContent = p.last_returncode === null ? '-' : p.last_returncode;
+            const noteInput = cells[9]?.querySelector('.project-note-input');
+            if (noteInput && document.activeElement !== noteInput) {
+                const noteValue = p.note || '';
+                noteInput.value = noteValue;
+                noteInput.dataset.savedValue = noteValue;
+                autoResizeProjectNote(noteInput);
+            }
             row.classList.toggle('running-row', p.status === 'running');
+            row.classList.toggle('has-note', !!String(p.note || '').trim());
         });
 
-        logProject.innerHTML = '';
-        allSortedProjects.forEach((p) => {
-            const opt = document.createElement('option');
-            opt.value = p.name;
-            opt.textContent = p.name;
-            logProject.appendChild(opt);
-        });
+        if (projectListSignature !== lastProjectListSignature) {
+            logProject.innerHTML = '';
+            allSortedProjects.forEach((p) => {
+                const opt = document.createElement('option');
+                opt.value = p.name;
+                opt.textContent = p.name;
+                logProject.appendChild(opt);
+            });
+            lastProjectListSignature = projectListSignature;
+        }
 
         if (currentLogSelection && allSortedProjects.some(x => x.name === currentLogSelection)) {
             logProject.value = currentLogSelection;
@@ -2167,19 +2436,7 @@ async function refreshData(prefetchedData = null, options = {}) {
         }
 
         const queueList = document.getElementById('queueList');
-        if (data.queue.length > 0) {
-            queueList.innerHTML = data.queue.map(item => `
-                <div class="queue-item">
-                    <div class="queue-head">
-                        <div class="queue-order">${item.order}</div>
-                        <div class="small">${t('queue_order')}</div>
-                    </div>
-                    <div><b>${escapeHtml(item.name)}</b></div>
-                </div>
-            `).join('');
-        } else {
-            queueList.innerHTML = `<div class="muted-box">${t('queue_empty')}</div>`;
-        }
+        queueList.innerHTML = renderQueueList(data.queue);
 
         const historyList = document.getElementById('historyList');
         if (data.history.length > 0) {
@@ -2206,11 +2463,13 @@ async function refreshData(prefetchedData = null, options = {}) {
                 window.scrollTo(prevScrollX, prevScrollY);
             });
         }
+        latestStateData = data;
         return;
     }
 
     body.innerHTML = '';
     logProject.innerHTML = '';
+    lastProjectListSignature = projectListSignature;
 
     allSortedProjects.forEach((p) => {
         const opt = document.createElement('option');
@@ -2222,48 +2481,37 @@ async function refreshData(prefetchedData = null, options = {}) {
     renderedProjects.forEach((p, index) => {
         const checked = selectedProjects.has(p.name) ? 'checked' : '';
         const runningClass = p.status === 'running' ? 'running-row' : '';
+        const noteClass = String(p.note || '').trim() ? 'has-note' : '';
         const isExpanded = expandedProjects.has(p.name);
         const isSelected = selectedProjects.has(p.name);
         const activeClass = (isExpanded || isSelected) ? 'project-row-active' : '';
+        const encodedProjectName = encodeURIComponent(p.name);
+        const actionOpenClass = openActionProject === p.name ? 'open' : '';
 
-        const actionButtons = p.status === 'running'
-            ? `
-                <div class="action-wrap">
-                    <button class="btn-warning btn-mini btn-icon" onclick="stopCurrentTrain()" title="${t('stop_button')}">■</button>
-                    <button class="btn-light btn-mini btn-icon" onclick="openProjectEditor('${encodeURIComponent(p.name)}')" title="${t('edit_button')}">✎</button>
-                    <button class="btn-success btn-mini btn-icon" onclick="openProjectDataUpload('${encodeURIComponent(p.name)}')" title="${t('add_data_zip')}">＋</button>
-                    <button class="btn-light btn-mini btn-icon" onclick="backupProject('${encodeURIComponent(p.name)}')" title="${t('backup_project')}">⇪</button>
-                    <button class="btn-light btn-mini btn-icon" onclick="duplicateProjectPrompt('${encodeURIComponent(p.name)}')" title="${t('duplicate_button')}">⧉</button>
-                    <button class="btn-warning btn-mini btn-icon" onclick="clearDatasetPrompt('${encodeURIComponent(p.name)}')" title="${t('clear_dataset_button')}">🧹</button>
-                    <button class="btn-danger btn-mini btn-icon" onclick="deleteProjectPrompt('${encodeURIComponent(p.name)}')" title="${t('delete_button')}">🗑</button>
-                </div>
-            `
+        const primaryAction = p.status === 'running'
+            ? `<button class="btn-warning btn-mini" onclick="stopCurrentTrain()" title="${t('stop_button')}"><span>■</span><span class="action-menu-label">${t('stop_button')}</span></button>`
             : p.status === 'failed'
-            ? `
-                <div class="action-wrap">
-                    <button class="btn-danger btn-mini btn-icon" onclick="queueSingle('${encodeURIComponent(p.name)}')" title="${t('retry_button')}">↻</button>
-                    <button class="btn-light btn-mini btn-icon" onclick="openProjectEditor('${encodeURIComponent(p.name)}')" title="${t('edit_button')}">✎</button>
-                    <button class="btn-success btn-mini btn-icon" onclick="openProjectDataUpload('${encodeURIComponent(p.name)}')" title="${t('add_data_zip')}">＋</button>
-                    <button class="btn-light btn-mini btn-icon" onclick="backupProject('${encodeURIComponent(p.name)}')" title="${t('backup_project')}">⇪</button>
-                    <button class="btn-light btn-mini btn-icon" onclick="duplicateProjectPrompt('${encodeURIComponent(p.name)}')" title="${t('duplicate_button')}">⧉</button>
-                    <button class="btn-warning btn-mini btn-icon" onclick="clearDatasetPrompt('${encodeURIComponent(p.name)}')" title="${t('clear_dataset_button')}">🧹</button>
-                    <button class="btn-danger btn-mini btn-icon" onclick="deleteProjectPrompt('${encodeURIComponent(p.name)}')" title="${t('delete_button')}">🗑</button>
+            ? `<button class="btn-danger btn-mini" onclick="queueSingle('${encodedProjectName}')" title="${t('retry_button')}"><span>↻</span><span class="action-menu-label">${t('retry_button')}</span></button>`
+            : `<button class="btn-primary btn-mini" onclick="queueSingle('${encodedProjectName}')" title="${t('train_button')}"><span>▶</span><span class="action-menu-label">${t('train_button')}</span></button>`;
+        const actionButtons = `
+            <div class="action-wrap ${actionOpenClass}" data-project="${escapeAttr(p.name)}">
+                <button class="btn-light btn-mini action-menu-toggle" type="button" title="Actions" onclick="toggleProjectActionMenu(event, '${encodedProjectName}')">⋮</button>
+                <div class="action-menu">
+                    ${primaryAction}
+                    <button class="btn-label btn-mini" onclick="openProjectEditor('${encodedProjectName}')" title="${t('label_editor')}"><span>▤</span><span class="action-menu-label">${t('label_editor')}</span></button>
+                    <button class="btn-predict btn-mini" onclick="runQuickPredictUnlabeled('${encodedProjectName}')" title="${t('quick_predict')}"><span>QP</span><span class="action-menu-label">${t('quick_predict')}</span></button>
+                    <button class="btn-primary btn-mini" onclick="quickTrainProject('${encodedProjectName}')" title="${t('quick_train')}"><span>QT</span><span class="action-menu-label">${t('quick_train')}</span></button>
+                    <button class="btn-success btn-mini" onclick="openProjectDataUpload('${encodedProjectName}')" title="${t('add_data_zip')}"><span>＋</span><span class="action-menu-label">${t('add_data_zip')}</span></button>
+                    <button class="btn-light btn-mini" onclick="backupProject('${encodedProjectName}')" title="${t('backup_project')}"><span>⇪</span><span class="action-menu-label">${t('backup_project')}</span></button>
+                    <button class="btn-light btn-mini" onclick="duplicateProjectPrompt('${encodedProjectName}')" title="${t('duplicate_button')}"><span>⧉</span><span class="action-menu-label">${t('duplicate_button')}</span></button>
+                    <button class="btn-warning btn-mini" onclick="clearDatasetPrompt('${encodedProjectName}')" title="${t('clear_dataset_button')}"><span>🧹</span><span class="action-menu-label">${t('clear_dataset_button')}</span></button>
+                    <button class="btn-danger btn-mini" onclick="deleteProjectPrompt('${encodedProjectName}')" title="${t('delete_button')}"><span>🗑</span><span class="action-menu-label">${t('delete_button')}</span></button>
                 </div>
-            `
-            : `
-                <div class="action-wrap">
-                    <button class="btn-primary btn-mini btn-icon" onclick="queueSingle('${encodeURIComponent(p.name)}')" title="${t('train_button')}">▶</button>
-                    <button class="btn-light btn-mini btn-icon" onclick="openProjectEditor('${encodeURIComponent(p.name)}')" title="${t('edit_button')}">✎</button>
-                    <button class="btn-success btn-mini btn-icon" onclick="openProjectDataUpload('${encodeURIComponent(p.name)}')" title="${t('add_data_zip')}">＋</button>
-                    <button class="btn-light btn-mini btn-icon" onclick="backupProject('${encodeURIComponent(p.name)}')" title="${t('backup_project')}">⇪</button>
-                    <button class="btn-light btn-mini btn-icon" onclick="duplicateProjectPrompt('${encodeURIComponent(p.name)}')" title="${t('duplicate_button')}">⧉</button>
-                    <button class="btn-warning btn-mini btn-icon" onclick="clearDatasetPrompt('${encodeURIComponent(p.name)}')" title="${t('clear_dataset_button')}">🧹</button>
-                    <button class="btn-danger btn-mini btn-icon" onclick="deleteProjectPrompt('${encodeURIComponent(p.name)}')" title="${t('delete_button')}">🗑</button>
-                </div>
-            `;
+            </div>
+        `;
 
         const tr = document.createElement('tr');
-        tr.className = [runningClass, activeClass].filter(Boolean).join(' ');
+        tr.className = [runningClass, noteClass, activeClass].filter(Boolean).join(' ');
         tr.innerHTML = `
             <td>${index + 1}</td>
             <td>
@@ -2286,22 +2534,24 @@ async function refreshData(prefetchedData = null, options = {}) {
             <td>${p.last_start || '-'}</td>
             <td>${p.last_end || '-'}</td>
             <td>${p.last_returncode === null ? '-' : p.last_returncode}</td>
-            <td>${actionButtons}</td>
+            <td class="action-cell">${actionButtons}</td>
+            <td class="note-cell">${renderProjectNoteCell(p.name, p.note || '')}</td>
         `;
         body.appendChild(tr);
+        autoResizeProjectNotes(tr);
 
         if (isExpanded) {
             const detailTr = document.createElement('tr');
             detailTr.className = 'detail-row';
-            detailTr.innerHTML = `<td colspan="9">${renderProjectDetailContent(p.name)}</td>`;
+            detailTr.innerHTML = `<td colspan="10">${renderProjectDetailContent(p.name)}</td>`;
             body.appendChild(detailTr);
         }
     });
 
     if ((data.projects || []).length === 0) {
-        body.innerHTML = `<tr><td colspan="9"><div class="muted-box">${t('project_not_found')}</div></td></tr>`;
+        body.innerHTML = `<tr><td colspan="10"><div class="muted-box">${t('project_not_found')}</div></td></tr>`;
     } else if (renderedProjects.length === 0) {
-        body.innerHTML = `<tr><td colspan="9"><div class="muted-box">${t('no_match_filter')}</div></td></tr>`;
+        body.innerHTML = `<tr><td colspan="10"><div class="muted-box">${t('no_match_filter')}</div></td></tr>`;
     }
 
     if (currentLogSelection && allSortedProjects.some(x => x.name === currentLogSelection)) {
@@ -2317,19 +2567,7 @@ async function refreshData(prefetchedData = null, options = {}) {
     document.getElementById('checkAll').checked = allChecks.length > 0 && allChecks.length === checkedChecks.length;
 
     const queueList = document.getElementById('queueList');
-    if (data.queue.length > 0) {
-        queueList.innerHTML = data.queue.map(item => `
-            <div class="queue-item">
-                <div class="queue-head">
-                    <div class="queue-order">${item.order}</div>
-                    <div class="small">${t('queue_order')}</div>
-                </div>
-                <div><b>${escapeHtml(item.name)}</b></div>
-            </div>
-        `).join('');
-    } else {
-        queueList.innerHTML = `<div class="muted-box">${t('queue_empty')}</div>`;
-    }
+    queueList.innerHTML = renderQueueList(data.queue);
 
     const historyList = document.getElementById('historyList');
     if (data.history.length > 0) {
@@ -2356,6 +2594,7 @@ async function refreshData(prefetchedData = null, options = {}) {
             window.scrollTo(prevScrollX, prevScrollY);
         });
     }
+    latestStateData = data;
 }
 
 function renderMonitorState(s) {
@@ -2498,37 +2737,208 @@ async function applySnapshot(snapshot = null) {
 }
 
 async function queueSingle(encodedName) {
-    const name = decodeURIComponent(encodedName);
-    resetProjectSelection();
-    const data = await apiGet('/api/queue', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({ project: name })
+    await withStatePollingPaused('queue_single', async () => {
+        const name = decodeURIComponent(encodedName);
+        resetProjectSelection();
+        const data = await apiGet('/api/queue', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ project: name })
+        });
+        alert(msg(data.message));
+        await refreshAll();
     });
-    alert(msg(data.message));
-    refreshAll();
 }
 
-async function queueSelected() {
+async function quickTrainProject(encodedName) {
+    const project = decodeURIComponent(encodedName);
+    closeProjectActionMenu();
+
+    const confirmed = await showConfirmDialog({
+        title: t('quick_train'),
+        message: `${project}\n\n${t('quick_train_confirm')}`,
+        confirmText: t('quick_train'),
+        cancelText: t('modal_cancel'),
+        confirmClass: 'btn-primary'
+    });
+    if (!confirmed) return;
+    if (!await ensureLv2()) return;
+
+    await withStatePollingPaused('quick_train', async () => {
+        try {
+            const result = await runQuickTrainSteps(project, { keepExpanded: true });
+            await refreshAll();
+
+            const counts = result.datasetResult.counts || {};
+            const countText = `Train=${counts.train ?? 0}, Valid=${counts.valid ?? 0}, Test=${counts.test ?? 0}`;
+            alert(`${t('quick_train_done')}\n${msg(result.queueData.message, 'OK')}\n${countText}`);
+        } catch (e) {
+            hideUploadProgress();
+            await refreshProjectAfterDataChange(project, { keepExpanded: true }).catch(console.error);
+            alert(`${t('quick_train_failed')}: ${msg(String(e.message || e), 'Error')}`);
+        }
+    });
+}
+
+function getQuickTrainDatasetPayload(project) {
+    return {
+        project,
+        train_percent: 80,
+        valid_percent: 20,
+        test_percent: 0,
+        shuffle: true,
+        seed: 42,
+        split_by_class: false,
+        train_all_data: true,
+        split_mode: 'count'
+    };
+}
+
+async function runQuickTrainSteps(project, options = {}) {
+    const keepExpanded = options.keepExpanded !== false;
+    await runDatasetTask(
+        project,
+        '/api/project/clear_dataset',
+        { project },
+        t('quick_train_clear')
+    );
+    await refreshProjectAfterDataChange(project, { keepExpanded });
+
+    const datasetResult = await runDatasetTask(
+        project,
+        '/api/project/create_dataset',
+        getQuickTrainDatasetPayload(project),
+        t('quick_train_create')
+    );
+    await refreshProjectAfterDataChange(project, { keepExpanded });
+
+    setUploadProgress(0, t('quick_train_queue'), project);
+    const queueData = await apiGet('/api/queue', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ project })
+    });
+    setUploadProgress(100, t('quick_train_done'), project);
+    await sleep(350);
+    hideUploadProgress();
+
+    return { datasetResult, queueData };
+}
+
+async function quickTrainSelectedProjects() {
     const projects = Array.from(selectedProjects);
     if (projects.length === 0) {
         alert(t('selected_none'));
         return;
     }
 
-    const data = await apiGet('/api/queue_selected', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({ projects })
+    const confirmed = await showConfirmDialog({
+        title: t('quick_train_selected'),
+        message: `${t('quick_train_selected_confirm')}\n\n- ${projects.join('\n- ')}`,
+        confirmText: t('quick_train_selected'),
+        cancelText: t('modal_cancel'),
+        confirmClass: 'btn-warning'
     });
+    if (!confirmed) return;
+    if (!await ensureLv2()) return;
 
-    resetProjectSelection();
-    alert(msg(data.message, 'OK'));
-    refreshAll();
+    await withStatePollingPaused('quick_train_selected', async () => {
+        const succeeded = [];
+        const failed = [];
+        for (let i = 0; i < projects.length; i += 1) {
+            const project = projects[i];
+            try {
+                setUploadProgress(
+                    Math.round((i / Math.max(1, projects.length)) * 100),
+                    `${t('quick_train_selected_progress')} ${i + 1}/${projects.length}`,
+                    project
+                );
+                const result = await runQuickTrainSteps(project, { keepExpanded: true });
+                const counts = result.datasetResult.counts || {};
+                succeeded.push(`${project} (Train=${counts.train ?? 0}, Valid=${counts.valid ?? 0}, Test=${counts.test ?? 0})`);
+            } catch (e) {
+                hideUploadProgress();
+                failed.push(`${project}: ${msg(String(e.message || e), 'Error')}`);
+                await refreshProjectAfterDataChange(project, { keepExpanded: true }).catch(console.error);
+            }
+        }
+
+        resetProjectSelection();
+        await refreshAll();
+        const lines = [`${t('quick_train_selected_done')}: ${succeeded.length}/${projects.length}`];
+        if (succeeded.length) lines.push('', 'OK:', ...succeeded.map(x => `- ${x}`));
+        if (failed.length) lines.push('', `${t('quick_train_failed')}:`, ...failed.map(x => `- ${x}`));
+        alert(lines.join('\n'));
+    });
 }
 
-function downloadSuccessOutputs() {
-    window.location.href = '/api/download_success_outputs';
+async function queueSelected() {
+    await withStatePollingPaused('queue_selected', async () => {
+        const projects = Array.from(selectedProjects);
+        if (projects.length === 0) {
+            alert(t('selected_none'));
+            return;
+        }
+
+        const data = await apiGet('/api/queue_selected', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ projects })
+        });
+
+        resetProjectSelection();
+        alert(msg(data.message, 'OK'));
+        await refreshAll();
+    });
+}
+
+async function clearSelectedDatasets() {
+    const projects = Array.from(selectedProjects);
+    if (projects.length === 0) {
+        alert(t('selected_none'));
+        return;
+    }
+
+    const confirmed = await showConfirmDialog({
+        title: t('clear_selected_dataset_title'),
+        message: `${t('clear_selected_dataset_confirm')}\n\n- ${projects.join('\n- ')}`,
+        confirmText: t('modal_confirm'),
+        cancelText: t('modal_cancel'),
+        confirmClass: 'btn-warning'
+    });
+    if (!confirmed) return;
+    if (!await ensureLv2()) return;
+
+    setUploadProgress(5, t('project_task_starting'), `${projects.length} project(s)`);
+    try {
+        const data = await apiGet('/api/projects/clear_selected_dataset', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ projects })
+        });
+
+        setUploadProgress(100, t('project_task_done'), msg(data.message, 'OK'));
+        await sleep(350);
+        hideUploadProgress();
+
+        resetProjectSelection();
+        await refreshProjectsAfterDataChange(projects, { keepExpanded: true });
+        alert(msg(data.message, 'OK'));
+    } catch (e) {
+        hideUploadProgress();
+        alert(msg(String(e), 'Clear selected dataset failed'));
+    }
+}
+
+function downloadSelectedOutputs() {
+    const projects = Array.from(selectedProjects);
+    if (projects.length === 0) {
+        alert(t('selected_none'));
+        return;
+    }
+    const params = new URLSearchParams();
+    projects.forEach(project => params.append('project', project));
+    window.location.href = `/api/download_selected_outputs?${params.toString()}`;
 }
 
 async function clearHistory() {
@@ -2547,6 +2957,195 @@ async function clearHistory() {
     historyBootstrapped = false;
     seenHistoryKeys = new Set();
     refreshAll();
+}
+
+async function showActivityLog() {
+    if (!await ensureLv3()) return;
+
+    try {
+        const data = await apiGet('/api/activity_log?limit=1000&session=1');
+        const items = Array.isArray(data.items) ? data.items.slice().reverse() : [];
+        const host = ensureModalHost();
+        const rowsHtml = items.length
+            ? items.map(item => `
+                <tr>
+                    <td>${escapeHtml(item.time || '-')}</td>
+                    <td>${escapeHtml(item.ip || '-')}</td>
+                    <td>${escapeHtml(item.user || '-')}</td>
+                    <td>${escapeHtml(item.action || '-')}</td>
+                    <td>${escapeHtml(item.status || '-')}</td>
+                    <td>${escapeHtml(item.project || '-')}</td>
+                    <td>${escapeHtml(item.target || '-')}</td>
+                    <td>${escapeHtml(item.details || '-')}</td>
+                </tr>
+            `).join('')
+            : `<tr><td colspan="8"><div class="muted-box">${t('activity_log_empty')}</div></td></tr>`;
+
+        host.innerHTML = `
+            <div class="web-modal-backdrop">
+                <div class="web-modal activity-log-modal" role="dialog" aria-modal="true" aria-label="${escapeAttr(t('activity_log_title'))}">
+                    <div class="web-modal-head activity-log-head">
+                        <div>
+                            <div class="web-modal-title">${escapeHtml(t('activity_log_title'))}</div>
+                            <div class="small">Session: ${escapeHtml(data.session_id || '-')} | ${Number(data.count || 0)} item(s)</div>
+                        </div>
+                        <button class="btn-light btn-mini" id="activityLogClose">Close</button>
+                    </div>
+                    <div class="web-modal-body activity-log-body">
+                        <table class="activity-log-table">
+                            <thead>
+                                <tr>
+                                    <th>Time</th>
+                                    <th>IP</th>
+                                    <th>User</th>
+                                    <th>Action</th>
+                                    <th>Status</th>
+                                    <th>Project</th>
+                                    <th>Target</th>
+                                    <th>Details</th>
+                                </tr>
+                            </thead>
+                            <tbody>${rowsHtml}</tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        `;
+
+        const close = () => { host.innerHTML = ''; };
+        host.querySelector('#activityLogClose')?.addEventListener('click', close);
+        host.querySelector('.web-modal-backdrop')?.addEventListener('click', (e) => {
+            if (e.target.classList.contains('web-modal-backdrop')) close();
+        });
+    } catch (e) {
+        alert(msg(String(e), 'Cannot load activity log'));
+    }
+}
+
+async function restartServer() {
+    const confirmed = await showConfirmDialog({
+        title: t('restart_server'),
+        message: t('restart_server_confirm'),
+        confirmText: t('modal_confirm'),
+        cancelText: t('modal_cancel'),
+        confirmClass: 'btn-warning'
+    });
+    if (!confirmed) return;
+    if (!await ensureLv3()) return;
+
+    try {
+        const data = await apiGet('/api/server/restart', { method: 'POST' });
+        alert(msg(data.message, t('restart_server_done')));
+        setTimeout(() => window.location.reload(), 4000);
+    } catch (e) {
+        alert(msg(String(e), 'Restart failed'));
+    }
+}
+
+async function showAccountManager() {
+    if (!await ensureLv3()) return;
+    try {
+        const data = await apiGet('/api/accounts');
+        renderAccountManager(data);
+    } catch (e) {
+        alert(msg(String(e), 'Cannot load accounts'));
+    }
+}
+
+function renderAccountManager(data = {}) {
+    const host = ensureModalHost();
+    const items = Array.isArray(data.items) ? data.items : [];
+    const rowsHtml = items.length
+        ? items.map(item => `
+            <tr>
+                <td>${escapeHtml(item.username || '-')} ${item.current ? '<span class="pill">current</span>' : ''}</td>
+                <td>${escapeHtml(item.created_at || '-')}</td>
+                <td>
+                    <button
+                        class="btn-danger btn-mini"
+                        onclick="deleteAccount('${encodeURIComponent(item.username || '')}')"
+                        ${item.current ? 'disabled' : ''}
+                    >${escapeHtml(t('account_delete'))}</button>
+                </td>
+            </tr>
+        `).join('')
+        : '<tr><td colspan="3"><div class="muted-box">No accounts</div></td></tr>';
+
+    host.innerHTML = `
+        <div class="web-modal-backdrop">
+            <div class="web-modal account-modal" role="dialog" aria-modal="true" aria-label="${escapeAttr(t('account_manager'))}">
+                <div class="web-modal-head activity-log-head">
+                    <div>
+                        <div class="web-modal-title">${escapeHtml(t('account_manager'))}</div>
+                        <div class="small">Current: ${escapeHtml(data.current_user || '-')}</div>
+                    </div>
+                    <button class="btn-light btn-mini" id="accountClose">Close</button>
+                </div>
+                <div class="web-modal-body account-body">
+                    <div class="account-create-row">
+                        <input id="accountUsername" class="web-modal-input" type="text" placeholder="${escapeAttr(t('account_username'))}" autocomplete="off">
+                        <input id="accountPassword" class="web-modal-input" type="password" placeholder="${escapeAttr(t('account_password'))}" autocomplete="new-password">
+                        <button class="btn-primary btn-mini" onclick="createAccount()">${escapeHtml(t('account_create'))}</button>
+                    </div>
+                    <table class="activity-log-table">
+                        <thead>
+                            <tr>
+                                <th>${escapeHtml(t('account_username'))}</th>
+                                <th>Created</th>
+                                <th>Action</th>
+                            </tr>
+                        </thead>
+                        <tbody>${rowsHtml}</tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    `;
+    const close = () => { host.innerHTML = ''; };
+    host.querySelector('#accountClose')?.addEventListener('click', close);
+    host.querySelector('.web-modal-backdrop')?.addEventListener('click', (e) => {
+        if (e.target.classList.contains('web-modal-backdrop')) close();
+    });
+}
+
+async function createAccount() {
+    const username = String(document.getElementById('accountUsername')?.value || '').trim();
+    const password = String(document.getElementById('accountPassword')?.value || '');
+    if (!username || !password) return;
+    try {
+        await apiGet('/api/accounts', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ username, password })
+        });
+        const data = await apiGet('/api/accounts');
+        renderAccountManager(data);
+    } catch (e) {
+        alert(msg(String(e), 'Cannot create account'));
+    }
+}
+
+async function deleteAccount(encodedUsername) {
+    const username = decodeURIComponent(encodedUsername);
+    const confirmed = await showConfirmDialog({
+        title: t('account_delete'),
+        message: username,
+        confirmText: t('modal_confirm'),
+        cancelText: t('modal_cancel'),
+        confirmClass: 'btn-danger'
+    });
+    if (!confirmed) return;
+    try {
+        await apiGet('/api/accounts/delete', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ username })
+        });
+        const data = await apiGet('/api/accounts');
+        renderAccountManager(data);
+    } catch (e) {
+        alert(msg(String(e), 'Cannot delete account'));
+    }
 }
 
 async function renameProjectPrompt(encodedName) {
@@ -2635,17 +3234,19 @@ async function clearDatasetPrompt(encodedName) {
     if (!confirmed) return;
     if (!await ensureLv2()) return;
 
-    const data = await runDatasetTask(
-        project,
-        '/api/project/clear_dataset',
-        { project },
-        t('clear_dataset_button')
-    );
+    try {
+        const data = await runDatasetTask(
+            project,
+            '/api/project/clear_dataset',
+            { project },
+            t('clear_dataset_button')
+        );
 
-    projectDetailCache.delete(project);
-    expandedProjects.delete(project);
-    alert(msg(data.message, 'OK'));
-    refreshAll();
+        await refreshProjectAfterDataChange(project, { keepExpanded: true });
+        alert(msg(data.message, 'OK'));
+    } catch (e) {
+        alert(msg(String(e.message || e), 'Clear dataset failed'));
+    }
 }
 
 async function deleteProjectPrompt(encodedName) {
@@ -2682,6 +3283,24 @@ async function queueAll() {
     const data = await apiGet('/api/queue_all', { method: 'POST' });
     alert(msg(data.message, `Added ${data.added.length} project(s)`));
     refreshAll();
+}
+
+async function reorderQueueProject(encodedName, direction) {
+    try {
+        const project = decodeURIComponent(encodedName);
+        const data = await apiGet('/api/queue/reorder', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ project, direction })
+        });
+        if (data.ok === false) {
+            alert(msg(data.message, 'Cannot reorder queue'));
+            return;
+        }
+        refreshAll();
+    } catch (e) {
+        alert(msg(String(e.message || e), 'Cannot reorder queue'));
+    }
 }
 
 async function retryFailed() {
@@ -2742,9 +3361,7 @@ async function revalidateRun(encodedProject, encodedRunFolder) {
             await sleep(1200);
         }
 
-        projectDetailCache.delete(project);
-        await ensureProjectDetailLoaded(project);
-        refreshData(latestStateData || undefined);
+        await refreshProjectAfterDataChange(project);
         hideUploadProgress();
         alert(msg(finalMessage, 'OK'));
     } catch (e) {
@@ -2871,15 +3488,101 @@ async function runModelTesting(encodedProject, encodedRunFolder) {
             await sleep(1200);
         }
 
-        projectDetailCache.delete(project);
-        await ensureProjectDetailLoaded(project);
-        refreshData(latestStateData || undefined);
+        await refreshProjectAfterDataChange(project);
         hideUploadProgress();
         alert(msg(finalMessage, 'OK'));
     } catch (e) {
         hideUploadProgress();
         alert(msg(String(e), 'Model testing failed'));
     }
+}
+
+function getPredictOptionsFromInputs(projectName) {
+    const id = projectDomId(projectName);
+    return {
+        weights_rel: String(document.getElementById(`predictModel_${id}`)?.value || ''),
+        options: {
+            conf: Number(document.getElementById(`predictConf_${id}`)?.value || 0.5),
+            iou: Number(document.getElementById(`predictIou_${id}`)?.value || 0.65),
+            imgsz: Number(document.getElementById(`predictImgsz_${id}`)?.value || 640),
+            device: String(document.getElementById(`predictDevice_${id}`)?.value || '').trim(),
+            max_det: Number(document.getElementById(`predictMaxDet_${id}`)?.value || 300),
+            save_conf: !!document.getElementById(`predictSaveConf_${id}`)?.checked,
+            include_empty_labels: !!document.getElementById(`predictIncludeEmpty_${id}`)?.checked,
+            save_empty_labels: !!document.getElementById(`predictSaveEmpty_${id}`)?.checked,
+        }
+    };
+}
+
+async function runPredictUnlabeled(encodedProject) {
+    const project = decodeURIComponent(encodedProject);
+    const form = getPredictOptionsFromInputs(project);
+    if (!form.weights_rel) {
+        alert(t('no_weights_files'));
+        return;
+    }
+
+    setUploadProgress(0, t('predict_starting'), `${project} | ${form.weights_rel}`);
+    try {
+        const data = await apiGet('/api/project/predict_unlabeled', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+                project,
+                weights_rel: form.weights_rel,
+                options: form.options
+            })
+        });
+        await waitForPredictTask(project, form.weights_rel, data);
+    } catch (e) {
+        hideUploadProgress();
+        alert(msg(String(e), 'Prediction failed'));
+    }
+}
+
+async function runQuickPredictUnlabeled(encodedProject) {
+    const project = decodeURIComponent(encodedProject);
+    setUploadProgress(0, t('predict_starting'), `${project} | latest best.pt`);
+    try {
+        const data = await apiGet('/api/project/predict_unlabeled/quick', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ project })
+        });
+        await waitForPredictTask(project, String(data.weights_rel || 'best.pt'), data);
+    } catch (e) {
+        hideUploadProgress();
+        alert(msg(String(e), 'Prediction failed'));
+    }
+}
+
+async function waitForPredictTask(project, weightsRel, data) {
+    const taskId = String(data.task_id || '');
+    let finalMessage = data.message || t('predict_done');
+    while (true) {
+        const status = await apiGet('/api/project/predict_unlabeled/status');
+        const pct = Math.max(0, Math.min(100, Number(status.progress) || 0));
+        const detail = msg(status.detail || `${project} | ${weightsRel}`);
+        setUploadProgress(pct, t('predict_progress'), detail);
+
+        if (String(status.id || '') !== taskId) {
+            throw new Error('Prediction task changed unexpectedly');
+        }
+        if (status.status === 'success') {
+            finalMessage = status.message || finalMessage;
+            setUploadProgress(100, t('predict_done'), detail);
+            await sleep(350);
+            break;
+        }
+        if (status.status === 'failed') {
+            throw new Error(msg(status.message, 'Prediction failed'));
+        }
+        await sleep(800);
+    }
+
+    await refreshProjectAfterDataChange(project);
+    hideUploadProgress();
+    alert(msg(finalMessage, 'OK'));
 }
 
 function openProjectUpload() {
@@ -2904,6 +3607,7 @@ function openProjectEditorAtImage(encodedName, encodedRel, encodedValidRel = '')
 }
 
 function setUploadProgress(percent, text = 'Uploading...', detail = '') {
+    pauseStatePolling('progress_overlay', STATE_POLL_PAUSE_TIMEOUT_MS);
     const host = ensureModalHost();
     if (!host) return;
 
@@ -2939,7 +3643,29 @@ function hideUploadProgress() {
     const host = ensureModalHost();
     if (host) host.innerHTML = '';
     uploadProgressVisible = false;
+    resumeStatePolling('progress_overlay_done', true);
 }
+
+async function refreshProjectDetail(projectName) {
+    await refreshProjectAfterDataChange(projectName);
+}
+
+window.addEventListener('storage', (event) => {
+    if (event.key !== 'train_control_data_changed' || !event.newValue) {
+        return;
+    }
+    try {
+        const payload = JSON.parse(event.newValue);
+        const project = String(payload.project || '');
+        if (project) {
+            refreshProjectAfterDataChange(project).catch(console.error);
+        } else {
+            refreshAll().catch(console.error);
+        }
+    } catch (e) {
+        refreshAll().catch(console.error);
+    }
+});
 
 function fmtEtaSeconds(sec) {
     const n = Number(sec);
@@ -3110,6 +3836,50 @@ function uploadFileWithProgress(url, file, extraFields = {}, progressText = null
     });
 }
 
+function uploadFilesWithProgress(url, files, extraFields = {}, progressText = null) {
+    return new Promise((resolve, reject) => {
+        const xhr = new XMLHttpRequest();
+        const fd = new FormData();
+        Array.from(files || []).forEach(file => {
+            fd.append('files', file);
+        });
+        Object.entries(extraFields || {}).forEach(([key, value]) => {
+            fd.append(key, value);
+        });
+
+        xhr.open('POST', url);
+        xhr.responseType = 'json';
+        xhr.withCredentials = true;
+
+        xhr.upload.onprogress = (e) => {
+            if (e.lengthComputable) {
+                const pct = (e.loaded / e.total) * 100;
+                setUploadProgress(pct, progressText || t('uploading'));
+            } else {
+                setUploadProgress(0, progressText || t('uploading'));
+            }
+        };
+
+        xhr.upload.onload = () => {
+            setUploadProgress(100, progressText || t('uploading'), t('server_processing'));
+        };
+
+        xhr.onload = () => {
+            const resp = xhr.response || {};
+            if (xhr.status >= 200 && xhr.status < 300) {
+                resolve(resp);
+                return;
+            }
+            reject(new Error(msg(resp.message, `HTTP ${xhr.status}`)));
+        };
+
+        xhr.onerror = () => reject(new Error('Network error while uploading'));
+        xhr.onabort = () => reject(new Error('Upload aborted'));
+
+        xhr.send(fd);
+    });
+}
+
 async function handleProjectUploadInput(inputEl) {
     try {
         const file = inputEl && inputEl.files && inputEl.files[0];
@@ -3138,23 +3908,29 @@ function openProjectDataUpload(encodedName) {
 
 async function handleProjectDataUploadInput(inputEl) {
     try {
-        const file = inputEl && inputEl.files && inputEl.files[0];
+        const files = inputEl && inputEl.files ? Array.from(inputEl.files) : [];
+        const file = files[0];
         const project = String(pendingProjectDataUpload || '');
-        if (!file || !project) return;
+        if (!files.length || !project) return;
 
         setUploadProgress(0, t('uploading_data'));
-        const data = await uploadFileWithProgress(
-            '/api/project/import_data_zip',
-            file,
-            { project },
-            t('uploading_data')
-        );
+        const isSingleZip = files.length === 1 && String(file.name || '').toLowerCase().endsWith('.zip');
+        const data = isSingleZip
+            ? await uploadFileWithProgress(
+                '/api/project/import_data_zip',
+                file,
+                { project },
+                t('uploading_data')
+            )
+            : await uploadFilesWithProgress(
+                '/api/project/import_data_images',
+                files,
+                { project },
+                t('uploading_data')
+            );
 
-        projectDetailCache.delete(project);
-        expandedProjects.add(project);
+        await refreshProjectAfterDataChange(project);
         alert(msg(data.message, 'Data imported'));
-        await ensureProjectDetailLoaded(project);
-        await refreshAll();
     } catch (e) {
         alert(String(e.message || e));
     } finally {
@@ -3254,15 +4030,26 @@ async function watchStateChanges() {
 
     while (true) {
         try {
-            const logProject = getRequestedLogProject();
-            const data = await apiGet(`/api/state/changes?since=${encodeURIComponent(stateVersion)}&timeout=25&with_snapshot=1&log_project=${encodeURIComponent(logProject)}&log_tail=150`);
+            const pauseRemaining = getStatePollPauseRemainingMs();
+            if (pauseRemaining > 0) {
+                await sleep(Math.min(500, pauseRemaining));
+                continue;
+            }
+
+            const data = await apiGet(`/api/state/changes?since=${encodeURIComponent(stateVersion)}&timeout=20&with_state=1`);
             if (data && data.version !== undefined && data.version !== null) {
                 stateVersion = Math.max(stateVersion, Number(data.version || 0));
             }
+            if (isStatePollingPaused()) {
+                continue;
+            }
             if (data && data.changed && data.snapshot) {
                 await applySnapshot(data.snapshot);
+            } else if (data && data.changed && data.state) {
+                await refreshData(data.state, { preserveScroll: true, lightweight: true });
             } else if (data && data.changed) {
-                await refreshAll();
+                const stateData = await apiGet('/api/state');
+                await refreshData(stateData, { preserveScroll: true, lightweight: true });
             }
         } catch (e) {
             await sleep(1500);
@@ -3275,6 +4062,11 @@ applyToolbarIcons();
 applySidePanelState();
 updateStickyLayoutMetrics();
 window.addEventListener('resize', updateStickyLayoutMetrics);
+document.addEventListener('click', (event) => {
+    if (!openActionProject) return;
+    if (event.target.closest?.('.action-wrap')) return;
+    closeProjectActionMenu();
+});
 if (typeof ResizeObserver !== 'undefined') {
     const stickyPanel = document.querySelector('.sticky-top-panel');
     if (stickyPanel) {
@@ -3419,10 +4211,5 @@ async function handleMsaFileSelect(event, encodedProject, encodedRunFolder) {
         }
         alert(String(e.message || e));
     }
-}
-
-function refreshProjectDetail(projectName) {
-    projectDetailCache.delete(projectName);
-    refreshData(latestStateData || undefined);
 }
 

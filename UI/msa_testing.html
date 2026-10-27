@@ -1,0 +1,446 @@
+<!doctype html>
+<html lang="vi">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>MSA Model Testing</title>
+    <style>
+        :root { color-scheme: dark; font-family: Segoe UI, Arial, sans-serif; background: #101722; color: #e9eef5; }
+        * { box-sizing: border-box; }
+        body { margin: 0; min-width: 320px; }
+        button, select, input { font: inherit; }
+        button, select, input[type="search"] { min-height: 36px; border: 1px solid #39475a; border-radius: 6px; background: #192433; color: #e9eef5; }
+        button { padding: 6px 12px; cursor: pointer; font-weight: 600; white-space: nowrap; }
+        button:hover:not(:disabled) { background: #26374a; border-color: #60748d; }
+        button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px solid #63b2f4; outline-offset: 2px; }
+        button:disabled { opacity: .48; cursor: default; }
+        select { padding: 6px 28px 6px 10px; cursor: pointer; }
+        input[type="search"] { padding: 7px 10px; width: 100%; }
+        .primary { background: #188753; border-color: #249f66; color: #fff; }
+        .primary:hover:not(:disabled) { background: #219c62; border-color: #48c188; }
+        .page-header { display: flex; align-items: center; gap: 12px; padding: 15px 20px; border-bottom: 1px solid #303d4e; background: #151e2b; }
+        .back-button { width: 36px; min-width: 36px; padding: 0; font-size: 19px; font-weight: 400; }
+        .heading { min-width: 0; }
+        h1 { font-size: 18px; line-height: 1.2; margin: 0; }
+        .project { display: block; color: #a9bed1; font-size: 12px; margin-top: 4px; overflow-wrap: anywhere; }
+        .controls { display: flex; align-items: end; gap: 10px; flex-wrap: wrap; padding: 14px 20px; border-bottom: 1px solid #303d4e; }
+        .field { display: grid; gap: 5px; min-width: 0; }
+        .field label { color: #a8bacb; font-size: 11px; font-weight: 700; text-transform: uppercase; }
+        .model-field { flex: 1 1 230px; max-width: 360px; }
+        .result-field { flex: 1 1 230px; max-width: 360px; }
+        .field select { width: 100%; }
+        .action-group { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+        .spacer { flex: 1; }
+        #status { margin: 0; padding: 0 20px; color: #9ed4ff; font-size: 13px; }
+        #status:not(:empty) { padding-top: 10px; padding-bottom: 10px; border-bottom: 1px solid #303d4e; background: #132537; }
+        #status.error { color: #ffaaaa; background: #352026; }
+        #progressPanel { padding: 12px 20px; border-bottom: 1px solid #303d4e; }
+        #progressPanel[hidden] { display: none; }
+        .progress-head { display: flex; justify-content: space-between; gap: 12px; color: #b9c9dc; font-size: 12px; margin-bottom: 6px; }
+        progress { width: 100%; height: 8px; accent-color: #3e9de3; }
+        .summary { display: flex; align-items: stretch; flex-wrap: wrap; border-bottom: 1px solid #303d4e; background: #151e2b; padding: 0 20px; }
+        .metric { min-width: 145px; padding: 12px 24px 12px 0; margin-right: 24px; border-right: 1px solid #303d4e; }
+        .metric:last-child { border-right: 0; }
+        .metric span { display: block; color: #a8bacb; font-size: 11px; }
+        .metric strong { display: block; font-size: 21px; margin-top: 3px; line-height: 1.2; }
+        .content { display: grid; grid-template-columns: minmax(220px, 260px) minmax(0, 1fr); min-height: 60vh; }
+        aside { border-right: 1px solid #303d4e; min-width: 0; background: #131c29; }
+        .aside-head { padding: 14px 12px 10px; border-bottom: 1px solid #303d4e; }
+        aside h2, main h2 { font-size: 13px; margin: 0 0 10px; }
+        #sampleCount { color: #9fb4c9; font-weight: 400; }
+        #sampleList { height: min(67vh, 720px); min-height: 300px; overflow-y: auto; padding: 6px; }
+        .sample { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 34px; padding: 6px 8px; margin: 0; border: 1px solid transparent; border-radius: 4px; background: transparent; text-align: left; font-weight: 400; white-space: normal; }
+        .sample:hover:not(:disabled) { background: #202e3f; border-color: transparent; }
+        .sample.active { border-color: #4178a8; background: #203a55; }
+        .sample-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
+        .sample-state { width: 8px; height: 8px; border-radius: 50%; flex: none; background: #71849a; }
+        .sample-state.wrong { background: #f16c72; }
+        .sample-state.correct { background: #39be80; }
+        .sample-state.unlabeled { background: #e9aa4f; }
+        .sample .muted { font-size: 11px; }
+        .sample[hidden] { display: none; }
+        main { padding: 16px 18px 20px; min-width: 0; }
+        .compare { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+        figure { margin: 0; min-width: 0; }
+        figcaption { display: flex; align-items: center; min-height: 34px; gap: 8px; font-size: 13px; font-weight: 600; }
+        .image-frame { border: 1px solid #354457; border-radius: 4px; background: #0b111a; display: grid; place-items: center; min-height: 300px; height: clamp(380px, 59vh, 760px); overflow: auto; }
+        .image-frame iframe { width: 100%; height: 100%; border: 0; }
+        .image-frame canvas { display: block; max-width: 100%; max-height: 100%; }
+        .image-frame canvas[hidden] { display: none; }
+        .empty-preview { color: #8fa5b9; font-size: 13px; text-align: center; padding: 20px; }
+        .empty-preview[hidden] { display: none; }
+        .predict-head { flex-wrap: wrap; }
+        .predict-head label { margin-left: auto; color: #b9c9dc; font-size: 11px; font-weight: 400; white-space: nowrap; }
+        .predict-head input { width: 80px; vertical-align: middle; accent-color: #3e9de3; }
+        .predict-head output { display: inline-block; min-width: 32px; color: #dbeafe; }
+        .predict-legend { display: flex; align-items: center; gap: 10px; font-size: 11px; color: #b9c9dc; font-weight: 400; }
+        .predict-legend span::before { content: ''; display: inline-block; width: 8px; height: 8px; margin-right: 4px; border-radius: 2px; background: var(--mark); }
+        .issues { min-height: 30px; padding-top: 10px; color: #ffc08f; font-size: 12px; }
+        .errors { padding: 18px 20px 30px; border-top: 1px solid #303d4e; }
+        .errors h2 { font-size: 14px; margin: 0 0 10px; }
+        .table-wrap { overflow-x: auto; }
+        table { width: 100%; border-collapse: collapse; text-align: left; font-size: 12px; }
+        th, td { padding: 9px 10px; border-bottom: 1px solid #303d4e; }
+        th { color: #a8bacb; font-weight: 600; }
+        tbody tr:hover { background: #1a2737; }
+        .muted { color: #9aacbf; font-size: 12px; }
+        @media (max-width: 1050px) { .compare { grid-template-columns: 1fr; } .image-frame { height: min(55vh, 560px); } }
+        @media (max-width: 720px) { .page-header, .controls, main, .errors { padding-left: 12px; padding-right: 12px; } .controls { align-items: stretch; } .model-field, .result-field { max-width: none; } .action-group { width: 100%; } .action-group button { flex: 1; } .spacer { display: none; } .content { grid-template-columns: 1fr; } aside { border-right: 0; border-bottom: 1px solid #303d4e; } #sampleList { min-height: 0; height: 180px; } .summary { padding: 0 12px; } .metric { min-width: 95px; margin-right: 12px; padding-right: 12px; } .metric strong { font-size: 18px; } .image-frame { height: min(58vh, 480px); } }
+    </style>
+</head>
+<body>
+<header class="page-header">
+    <button class="back-button" type="button" onclick="window.close()" title="Đóng trang" aria-label="Đóng trang">←</button>
+    <div class="heading"><h1>MSA Model Testing</h1><span class="project" id="projectTitle"></span></div>
+</header>
+<div class="controls">
+    <div class="field model-field"><label for="modelSelect">Model đánh giá</label><select id="modelSelect"></select></div>
+    <div class="field result-field"><label for="resultSelect">Lần chạy</label><select id="resultSelect"></select></div>
+    <div class="action-group"><button class="primary" id="runButton" type="button">Chạy MSA</button><button id="predictLabelsButton" type="button" title="Tạo label gốc cho ảnh MSA chưa có nhãn">Predict label gốc</button></div>
+    <span class="spacer"></span>
+    <input id="zipInput" type="file" accept=".zip" hidden>
+    <button type="button" id="uploadButton">Nhập ZIP MSA</button>
+</div>
+<p id="status"></p>
+<div id="progressPanel" hidden><div class="progress-head"><span id="progressLabel"></span><span id="progressValue"></span></div><progress id="taskProgress" max="100" value="0"></progress></div>
+<section class="summary" id="summary"></section>
+<div class="content">
+    <aside><div class="aside-head"><h2>Ảnh MSA <span id="sampleCount"></span></h2><input id="sampleSearch" type="search" placeholder="Tìm tên ảnh..." aria-label="Tìm ảnh MSA"></div><div id="sampleList"></div></aside>
+    <main><div class="compare">
+        <figure><figcaption>Label gốc</figcaption><div class="image-frame"><iframe id="msaEditorFrame" title="MSA Label Editor"></iframe></div></figure>
+        <figure><figcaption class="predict-head"><span>Model predict</span><span class="predict-legend"><span style="--mark:#21bf73">Đúng</span><span style="--mark:#f04452">Sai</span><span style="--mark:#ffb547">Bỏ sót</span></span><label for="predictFontSize">Cỡ chữ <input id="predictFontSize" type="range" min="10" max="30" step="1" value="16"><output id="predictFontValue">16px</output></label></figcaption><div class="image-frame" id="predictFrame"><canvas id="predictCanvas" role="img" aria-label="Ảnh predict với bbox được đánh dấu"></canvas><span class="empty-preview" id="predictionEmpty">Chưa có kết quả predict cho ảnh này</span></div></figure>
+    </div><div class="issues" id="sampleIssues"></div></main>
+</div>
+<section class="errors"><h2>Lỗi theo class</h2><div id="errorTable" class="table-wrap muted">Chưa có kết quả.</div></section>
+<script>
+const project = {{ project_name|tojson }};
+const initialRun = new URLSearchParams(location.search).get('run') || '';
+let currentResult = null;
+let selectedImage = '';
+let currentSamples = [];
+let visibleSamples = [];
+let polling = null;
+let editorReady = false;
+let editorRefreshPending = false;
+let predictionData = null;
+let predictionImage = null;
+let predictionRequestId = 0;
+const $ = id => document.getElementById(id);
+const escapeHtml = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const imageUrl = rel => `/api/project/msa/file?project=${encodeURIComponent(project)}&rel=${encodeURIComponent(rel)}`;
+async function api(url, options) {
+    const response = await fetch(url, options);
+    const raw = await response.text();
+    let data;
+    try { data = JSON.parse(raw); }
+    catch { throw new Error(response.status === 413 ? 'ZIP vượt giới hạn upload của server.' : `Server trả về lỗi HTTP ${response.status}. Kiểm tra log server.`); }
+    if (!response.ok || !data.ok) throw new Error(data.message || `HTTP ${response.status}`);
+    return data;
+}
+function setStatus(message, error = false) { $('status').textContent = message; $('status').classList.toggle('error', error); }
+function setProgress(label, percent, detail = '') {
+    const value = Math.max(0, Math.min(100, Number(percent) || 0));
+    $('progressPanel').hidden = false;
+    $('progressLabel').textContent = label;
+    $('progressValue').textContent = `${value}%${detail ? ` · ${detail}` : ''}`;
+    $('taskProgress').value = value;
+}
+function hideProgress() { $('progressPanel').hidden = true; }
+function progressFromTask(task) {
+    const detail = task.total ? `${task.processed || 0}/${task.total} ảnh` : '';
+    setStatus(task.message || 'Đang xử lý...');
+    setProgress(task.message || 'Đang xử lý...', task.progress, detail);
+}
+function metric(label, value) { return `<div class="metric"><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong></div>`; }
+function filterSampleList() {
+    const query = $('sampleSearch').value.trim().toLocaleLowerCase();
+    let matches = 0;
+    $('sampleList').querySelectorAll('.sample').forEach(button => {
+        button.hidden = !visibleSamples[Number(button.dataset.index)].image_name.toLocaleLowerCase().includes(query);
+        if (!button.hidden) matches += 1;
+    });
+    const empty = $('sampleSearchEmpty');
+    if (empty) empty.hidden = matches > 0;
+}
+function renderSampleList() {
+    $('sampleList').innerHTML = visibleSamples.map((item, index) => {
+        const state = item.has_label === false ? 'unlabeled' : item.status === 'wrong' ? 'wrong' : item.status === 'correct' ? 'correct' : '';
+        const label = item.has_label === false ? 'Thiếu label' : item.status === 'wrong' ? 'Có lỗi' : item.status === 'correct' ? 'Đúng' : 'Chưa test';
+        return `<button class="sample ${item.image_name === selectedImage ? 'active' : ''}" type="button" data-index="${index}" title="${escapeHtml(item.image_name)} · ${label}"><span class="sample-state ${state}" aria-label="${label}"></span><span class="sample-name">${escapeHtml(item.image_name)}</span></button>`;
+    }).join('') + (visibleSamples.length ? '<p class="muted" id="sampleSearchEmpty" hidden>Không tìm thấy ảnh.</p>' : '<p class="muted">Chưa có ảnh MSA. Nhập ZIP để bắt đầu.</p>');
+    $('sampleList').querySelectorAll('.sample').forEach(button => button.addEventListener('click', () => selectSample(Number(button.dataset.index))));
+    filterSampleList();
+}
+async function loadOverview(preferredResult = '') {
+    const data = await api(`/api/project/msa?project=${encodeURIComponent(project)}`);
+    currentSamples = data.samples;
+    const modelSelect = $('modelSelect');
+    const oldModel = modelSelect.value;
+    modelSelect.innerHTML = data.models.map(model => {
+        const value = `${model.run_folder}|${model.weight}`;
+        return `<option value="${escapeHtml(value)}">${escapeHtml(model.run_folder)} / ${escapeHtml(model.weight)}</option>`;
+    }).join('');
+    const wantedModel = data.models.find(model => model.run_folder === initialRun);
+    if (oldModel && [...modelSelect.options].some(option => option.value === oldModel)) modelSelect.value = oldModel;
+    else if (wantedModel) modelSelect.value = `${wantedModel.run_folder}|${wantedModel.weight}`;
+    const busy = [data.task, data.upload_task, data.label_task].some(task => task.status === 'running');
+    $('runButton').disabled = !data.models.length || !data.samples.length || data.samples.some(sample => !sample.has_label) || busy;
+    $('predictLabelsButton').disabled = !data.models.length || !data.samples.some(sample => !sample.has_label) || busy;
+    $('uploadButton').disabled = busy;
+    const resultSelect = $('resultSelect');
+    const oldResult = preferredResult || resultSelect.value;
+    resultSelect.innerHTML = data.results.map(result => `<option value="${escapeHtml(result.id)}">${escapeHtml(result.created_at)} · ${escapeHtml(result.run_folder)} / ${escapeHtml(result.weight)}</option>`).join('');
+    if (oldResult && data.results.some(result => result.id === oldResult)) resultSelect.value = oldResult;
+    $('sampleCount').textContent = `(${data.samples.length})`;
+    if (resultSelect.value) await loadResult(resultSelect.value);
+    else renderEmpty(data.samples);
+    if (data.task.status === 'running' && data.task.project === project) { progressFromTask(data.task); startPolling('run'); }
+    else if (data.upload_task.status === 'running' && data.upload_task.project === project) { progressFromTask(data.upload_task); startPolling('upload'); }
+    else if (data.label_task.status === 'running' && data.label_task.project === project) { progressFromTask(data.label_task); startPolling('label'); }
+    return data;
+}
+function renderEmpty(samples) {
+    currentResult = null;
+    visibleSamples = samples.map(sample => ({ image_name: sample.name, status: 'not_tested', has_label: sample.has_label }));
+    predictionRequestId += 1;
+    $('summary').innerHTML = metric('Ảnh MSA', samples.length) + metric('Ảnh sai', '-') + metric('Tỷ lệ sai', '-');
+    renderSampleList();
+    if (samples.length) {
+        const selected = samples.find(sample => sample.name === selectedImage) || samples[0];
+        selectedImage = selected.name;
+        $('sampleList').querySelectorAll('.sample').forEach(button => button.classList.toggle('active', samples[Number(button.dataset.index)].name === selectedImage));
+        openEditorForImage(selected.name);
+    }
+    predictionData = null;
+    predictionImage = null;
+    drawPrediction();
+    $('sampleIssues').textContent = ''; $('errorTable').textContent = 'Chưa có kết quả.';
+}
+function openEditorForImage(imageName) {
+    const frame = $('msaEditorFrame');
+    if (!frame.getAttribute('src')) {
+        frame.src = `/project_editor?project=${encodeURIComponent(project)}&msa=1&embed=1&rel=${encodeURIComponent(imageName)}`;
+        return;
+    }
+    if (editorReady) frame.contentWindow.postMessage({ type: 'msa-open-image', image: imageName }, location.origin);
+}
+function refreshEditorImages() {
+    if (!editorReady) { editorRefreshPending = true; return; }
+    $('msaEditorFrame').contentWindow.postMessage({ type: 'msa-refresh-images', image: selectedImage }, location.origin);
+    editorRefreshPending = false;
+}
+async function loadResult(id) {
+    const data = await api(`/api/project/msa/result?project=${encodeURIComponent(project)}&id=${encodeURIComponent(id)}`);
+    currentResult = data.result;
+    $('summary').innerHTML = metric('Ảnh MSA', currentResult.total_images) + metric('Ảnh sai / tổng', `${currentResult.wrong_images} / ${currentResult.total_images}`) + metric('Tỷ lệ sai', `${currentResult.error_rate}%`);
+    const errors = Object.entries(currentResult.class_errors || {});
+    $('errorTable').innerHTML = errors.length ? `<table><thead><tr><th>Class</th><th>Ảnh sai / tổng</th><th>Tỷ lệ</th><th>Thiếu</th><th>Thừa</th></tr></thead><tbody>${errors.map(([id, row]) => `<tr><td>${escapeHtml(id)}: ${escapeHtml(row.class_name)}</td><td>${escapeHtml(row.wrong_images)} / ${escapeHtml(currentResult.total_images)}</td><td>${escapeHtml(row.percentage)}%</td><td>${escapeHtml(row.missed)}</td><td>${escapeHtml(row.extra)}</td></tr>`).join('')}</tbody></table>` : 'Không có lỗi class trong bộ MSA này.';
+    const resultItems = currentResult.sample_items || [];
+    const byName = new Map(resultItems.map(item => [item.image_name, item]));
+    visibleSamples = currentSamples.length
+        ? currentSamples.map(sample => ({ ...(byName.get(sample.name) || { image_name: sample.name, status: 'not_tested' }), has_label: sample.has_label }))
+        : resultItems;
+    renderSampleList();
+    selectSample(Math.max(0, visibleSamples.findIndex(item => item.image_name === selectedImage)));
+}
+function selectSample(index) {
+    const item = visibleSamples[index];
+    if (!item) return;
+    selectedImage = item.image_name;
+    $('sampleList').querySelectorAll('button').forEach((button, i) => button.classList.toggle('active', i === index));
+    openEditorForImage(item.image_name);
+    if (item.status === 'not_tested') {
+        predictionRequestId += 1;
+        predictionData = null;
+        predictionImage = null;
+        drawPrediction();
+        $('sampleIssues').textContent = 'Ảnh chưa có trong lần test này.';
+    } else {
+        loadPredictionForSample(item.image_name);
+        $('sampleIssues').textContent = item.issues?.length ? item.issues.map(issue => `${issue.class_name}: thiếu ${issue.missed}, thừa ${issue.extra}`).join(' · ') : 'Đúng class và số lượng bbox.';
+    }
+}
+async function loadPredictionForSample(imageName) {
+    const requestId = ++predictionRequestId;
+    const id = currentResult?.id;
+    if (!id) return;
+    try {
+        const data = await api(`/api/project/msa/sample?project=${encodeURIComponent(project)}&id=${encodeURIComponent(id)}&image=${encodeURIComponent(imageName)}`);
+        const image = new Image();
+        image.src = imageUrl(data.image_rel);
+        await image.decode();
+        if (requestId !== predictionRequestId) return;
+        predictionData = data;
+        predictionImage = image;
+        drawPrediction();
+    } catch (error) {
+        if (requestId === predictionRequestId) setStatus(error.message, true);
+    }
+}
+function drawPrediction() {
+    const canvas = $('predictCanvas');
+    const frame = $('predictFrame');
+    const context = canvas.getContext('2d');
+    canvas.hidden = !(predictionImage && predictionData);
+    $('predictionEmpty').hidden = Boolean(predictionImage && predictionData);
+    if (!predictionImage || !predictionData) {
+        canvas.width = 1; canvas.height = 1;
+        context.clearRect(0, 0, 1, 1);
+        return;
+    }
+    const maxWidth = Math.max(1, frame.clientWidth - 4);
+    const maxHeight = Math.max(1, frame.clientHeight - 4);
+    const scale = Math.min(maxWidth / predictionImage.naturalWidth, maxHeight / predictionImage.naturalHeight);
+    const width = Math.max(1, Math.floor(predictionImage.naturalWidth * scale));
+    const height = Math.max(1, Math.floor(predictionImage.naturalHeight * scale));
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    canvas.width = Math.round(width * dpr);
+    canvas.height = Math.round(height * dpr);
+    canvas.style.width = `${width}px`;
+    canvas.style.height = `${height}px`;
+    context.setTransform(dpr, 0, 0, dpr, 0, 0);
+    context.drawImage(predictionImage, 0, 0, width, height);
+    const fontSize = Number($('predictFontSize').value) || 16;
+    context.font = `600 ${fontSize}px Segoe UI, Arial, sans-serif`;
+    context.textBaseline = 'middle';
+    const names = predictionData.class_names || {};
+    const drawBox = (box, color, label, dashed = false) => {
+        const x = (Number(box.cx) - Number(box.w) / 2) * width;
+        const y = (Number(box.cy) - Number(box.h) / 2) * height;
+        const boxWidth = Number(box.w) * width;
+        const boxHeight = Number(box.h) * height;
+        context.save();
+        context.strokeStyle = color;
+        context.lineWidth = dashed ? 3 : 2.5;
+        context.setLineDash(dashed ? [8, 5] : []);
+        context.strokeRect(x, y, boxWidth, boxHeight);
+        context.restore();
+        const labelHeight = fontSize + 8;
+        const labelWidth = Math.min(width, Math.ceil(context.measureText(label).width + 12));
+        const labelX = Math.max(0, Math.min(x, width - labelWidth));
+        const labelY = y >= labelHeight ? y - labelHeight : Math.min(height - labelHeight, y + 3);
+        context.fillStyle = color;
+        context.fillRect(labelX, labelY, labelWidth, labelHeight);
+        context.fillStyle = '#08111d';
+        context.fillText(label, labelX + 6, labelY + labelHeight / 2, Math.max(1, labelWidth - 12));
+    };
+    (predictionData.pred_boxes || []).forEach((box, index) => {
+        const status = predictionData.pred_statuses?.[index] || 'extra';
+        const name = String(names[String(box.cls)] || box.cls);
+        const confidence = Number.isFinite(Number(box.confidence)) ? ` ${Math.round(Number(box.confidence) * 100)}%` : '';
+        const prefix = status === 'wrong_class' ? 'Sai class: ' : status === 'extra' ? 'Thừa: ' : '';
+        drawBox(box, status === 'correct' ? '#21bf73' : '#f04452', `${prefix}${name}${confidence}`);
+    });
+    (predictionData.missed_gt_indices || []).forEach(index => {
+        const box = predictionData.gt_boxes?.[index];
+        if (box) drawBox(box, '#ffb547', `Bỏ sót: ${String(names[String(box.cls)] || box.cls)}`, true);
+    });
+}
+async function uploadZip() {
+    const file = $('zipInput').files[0];
+    if (!file) return;
+    $('uploadButton').disabled = true;
+    setStatus('Đang gửi ZIP...');
+    setProgress('Đang gửi ZIP', 0);
+    const body = new FormData(); body.append('project', project); body.append('file', file);
+    try {
+        await new Promise((resolve, reject) => {
+            const xhr = new XMLHttpRequest();
+            xhr.open('POST', '/api/project/msa/upload');
+            xhr.upload.onprogress = event => {
+                if (event.lengthComputable) setProgress('Đang gửi ZIP', Math.round(event.loaded * 100 / event.total));
+            };
+            xhr.onload = () => {
+                let data;
+                try { data = JSON.parse(xhr.responseText); }
+                catch { reject(new Error(`Server trả về lỗi HTTP ${xhr.status}. Kiểm tra log server.`)); return; }
+                if (xhr.status < 200 || xhr.status >= 300 || !data.ok) reject(new Error(data.message || `HTTP ${xhr.status}`));
+                else resolve(data);
+            };
+            xhr.onerror = () => reject(new Error('Không kết nối được server.'));
+            xhr.send(body);
+        });
+        setProgress('Đang nhập mẫu MSA', 0);
+        startPolling('upload');
+    } catch (error) { setStatus(error.message, true); hideProgress(); $('uploadButton').disabled = false; }
+    finally { $('zipInput').value = ''; }
+}
+function startPolling(kind) {
+    if (polling) return;
+    polling = setInterval(async () => {
+        try {
+            const data = await api('/api/project/msa/status');
+            const task = kind === 'upload' ? data.upload_task : kind === 'label' ? data.label_task : data.task;
+            if (task.status === 'running' && task.project === project) { progressFromTask(task); return; }
+            clearInterval(polling); polling = null;
+            setStatus(task.message, task.status === 'failed');
+            if (task.status === 'success') setProgress(task.message, 100);
+            else hideProgress();
+            await loadOverview(kind === 'run' && task.status === 'success' ? task.result_id : '');
+            if ((kind === 'upload' || kind === 'label') && task.status === 'success') refreshEditorImages();
+            if (kind === 'label' && task.status === 'success') setStatus(`${task.message}. Label do model tạo cần được kiểm tra trước khi đánh giá MSA.`);
+            if (task.status === 'success') setTimeout(hideProgress, 1500);
+        } catch (error) { setStatus(error.message, true); }
+    }, 1500);
+}
+async function runMsa() {
+    const option = $('modelSelect').selectedOptions[0];
+    if (!option) return;
+    const value = option.value;
+    const split = value.lastIndexOf('|');
+    $('runButton').disabled = true;
+    setStatus('Đang chạy MSA...');
+    setProgress('Tải model', 0);
+    try {
+        await api('/api/project/msa/run', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ project, run_folder: value.slice(0, split), weight: value.slice(split + 1) }) });
+        startPolling('run');
+    } catch (error) { setStatus(error.message, true); hideProgress(); $('runButton').disabled = false; }
+}
+async function predictMissingLabels() {
+    const option = $('modelSelect').selectedOptions[0];
+    if (!option) return;
+    const value = option.value;
+    const split = value.lastIndexOf('|');
+    $('predictLabelsButton').disabled = true;
+    setStatus('Đang predict label gốc...');
+    setProgress('Tải model', 0);
+    try {
+        await api('/api/project/msa/predict_labels', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ project, run_folder: value.slice(0, split), weight: value.slice(split + 1) }),
+        });
+        startPolling('label');
+    } catch (error) { setStatus(error.message, true); hideProgress(); $('predictLabelsButton').disabled = false; }
+}
+$('projectTitle').textContent = project;
+$('uploadButton').addEventListener('click', () => $('zipInput').click());
+$('zipInput').addEventListener('change', uploadZip);
+$('runButton').addEventListener('click', runMsa);
+$('predictLabelsButton').addEventListener('click', predictMissingLabels);
+$('resultSelect').addEventListener('change', event => loadResult(event.target.value).catch(error => setStatus(error.message, true)));
+$('sampleSearch').addEventListener('input', filterSampleList);
+const savedFontSize = Number(localStorage.getItem('msa_predict_font_size'));
+if (Number.isFinite(savedFontSize) && savedFontSize >= 10 && savedFontSize <= 30) $('predictFontSize').value = String(savedFontSize);
+$('predictFontValue').textContent = `${$('predictFontSize').value}px`;
+$('predictFontSize').addEventListener('input', event => {
+    $('predictFontValue').textContent = `${event.target.value}px`;
+    localStorage.setItem('msa_predict_font_size', event.target.value);
+    drawPrediction();
+});
+new ResizeObserver(() => drawPrediction()).observe($('predictFrame'));
+window.addEventListener('message', event => {
+    if (event.origin !== location.origin || event.source !== $('msaEditorFrame').contentWindow || event.data?.project !== project) return;
+    if (event.data.type === 'msa-editor-ready') {
+        editorReady = true;
+        if (editorRefreshPending) refreshEditorImages();
+        else if (selectedImage) openEditorForImage(selectedImage);
+    }
+    if (event.data.type === 'msa-label-saved') {
+        setStatus('Đã lưu label MSA. Chạy MSA lại để cập nhật kết quả đối chiếu.');
+        if (event.data.image === selectedImage && currentResult) loadPredictionForSample(selectedImage);
+    }
+});
+loadOverview().catch(error => setStatus(error.message, true));
+</script>
+</body>
+</html>

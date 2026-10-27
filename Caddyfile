@@ -1,0 +1,17 @@
+{
+	admin 127.0.0.1:2019
+	auto_https disable_certs
+	persist_config off
+	storage file_system D:/TrainControl/.caddy-data
+}
+
+aisystemmyhome.ddns.net {
+	encode zstd gzip
+	reverse_proxy 127.0.0.1:821
+}
+
+https://aisystemmyhome.ddns.net:820 {
+	tls D:/TrainControl/certs/traincontrol-cert.pem D:/TrainControl/certs/traincontrol-key.pem
+	encode zstd gzip
+	reverse_proxy 127.0.0.1:821
+}

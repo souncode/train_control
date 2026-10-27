@@ -1,7 +1,10 @@
 import json
+import os
 import re
 import shutil
+import stat
 import tempfile
+import time
 import zipfile
 from pathlib import Path
 
@@ -37,10 +40,117 @@ def is_path_inside(child: Path, parent: Path) -> bool:
         return False
 
 
+def _make_writable(path):
+    try:
+        os.chmod(path, stat.S_IWRITE | stat.S_IREAD | stat.S_IEXEC)
+    except Exception:
+        pass
+
+
+def _rmtree_onerror(func, path, exc_info):
+    _make_writable(path)
+    func(path)
+
+
+def robust_rmtree(target: Path, retries: int = 5, delay: float = 0.25):
+    last_error = None
+    for attempt in range(max(1, int(retries))):
+        try:
+            shutil.rmtree(target, onerror=_rmtree_onerror)
+            return
+        except FileNotFoundError:
+            return
+        except PermissionError as e:
+            last_error = e
+        except OSError as e:
+            last_error = e
+
+        try:
+            if target.exists():
+                _make_writable(target)
+                for child in target.rglob("*"):
+                    _make_writable(child)
+        except Exception:
+            pass
+
+        if attempt < max(1, int(retries)) - 1:
+            time.sleep(max(0.0, float(delay)) * (attempt + 1))
+
+    raise last_error or PermissionError(f"Cannot delete {target}")
+
+
+def cleanup_delete_pending(project_path: Path):
+    pending_root = (project_path / ".tc_delete_pending").resolve()
+    if not is_path_inside(pending_root, project_path) or not pending_root.exists():
+        return []
+
+    cleaned = []
+    try:
+        pending_items = list(pending_root.iterdir())
+    except Exception:
+        return cleaned
+
+    for item in pending_items:
+        try:
+            if item.is_dir():
+                robust_rmtree(item, retries=2, delay=0.1)
+            elif item.exists():
+                _make_writable(item)
+                item.unlink()
+            cleaned.append(item.name)
+        except Exception:
+            pass
+
+    try:
+        pending_root.rmdir()
+    except Exception:
+        pass
+    return cleaned
+
+
+def _unique_pending_path(project_path: Path, target: Path):
+    pending_root = (project_path / ".tc_delete_pending").resolve()
+    pending_root.mkdir(parents=True, exist_ok=True)
+    stamp = f"{int(time.time() * 1000)}_{os.getpid()}"
+    return pending_root / f"{target.name}_{stamp}"
+
+
+def remove_tree_best_effort(target: Path, project_path: Path):
+    target = Path(target).resolve()
+    project_path = Path(project_path).resolve()
+    if not is_path_inside(target, project_path):
+        return False, None, "invalid_path"
+    if not target.exists():
+        return False, None, None
+
+    cleanup_delete_pending(project_path)
+
+    pending_path = None
+    try:
+        pending_path = _unique_pending_path(project_path, target).resolve()
+        if not is_path_inside(pending_path, project_path):
+            return False, None, "invalid_pending_path"
+        target.rename(pending_path)
+        try:
+            robust_rmtree(pending_path, retries=8, delay=0.2)
+            return True, None, None
+        except Exception as e:
+            return True, str(pending_path), str(e)
+    except Exception as rename_error:
+        try:
+            robust_rmtree(target, retries=8, delay=0.2)
+            return True, None, None
+        except Exception as delete_error:
+            return False, str(pending_path) if pending_path else None, f"{rename_error}; {delete_error}"
+
+
 def clear_project_dataset_dirs(project_path: Path, progress_cb=None):
     removed = []
+    pending = []
+    errors = []
     folders = ("runs", "test", "train", "valid")
     total = len(folders)
+    cleanup_delete_pending(project_path)
     for idx, folder_name in enumerate(folders, start=1):
         target = (project_path / folder_name).resolve()
         if not is_path_inside(target, project_path):
@@ -51,13 +161,22 @@ def clear_project_dataset_dirs(project_path: Path, progress_cb=None):
             except Exception:
                 pass
         if target.exists() and target.is_dir():
-            shutil.rmtree(target)
-            removed.append(folder_name)
+            ok, pending_path, err = remove_tree_best_effort(target, project_path)
+            if ok:
+                removed.append(folder_name)
+                if pending_path:
+                    pending.append(f"{folder_name} -> {pending_path}")
+            elif err:
+                errors.append(f"{folder_name}: {err}")
         if callable(progress_cb):
             try:
                 progress_cb(idx, total, folder_name, "done")
             except Exception:
                 pass
+    if errors:
+        raise PermissionError("; ".join(errors))
+    if pending:
+        removed.extend([f"pending cleanup: {x}" for x in pending])
     return removed
 
 
@@ -174,10 +293,11 @@ def resolve_uploaded_project_dir(extract_root: Path):
     return extract_root, None
 
 
-def save_uploaded_project_zip(upload_file, base_dir: Path, sanitize_name):
+def save_uploaded_project_zip(upload_file, root_dir: Path, sanitize_name):
     if not upload_file:
         return False, "missing_file", None
 
+    root_dir = Path(root_dir)
     filename = str(upload_file.filename or "").strip()
     if not filename.lower().endswith(".zip"):
         return False, "only_zip_supported", None
@@ -217,12 +337,19 @@ def save_uploaded_project_zip(upload_file, base_dir: Path, sanitize_name):
             suggested_name = Path(filename).stem
 
         target_name = sanitize_name(suggested_name)
-        target_dir = ROOT_DIR / target_name
-
+        target_dir = root_dir / target_name
         if target_dir.exists():
-            return False, "project_already_exists", target_name
+            base_name = f"{str(target_name or '').strip()} - Copy".strip()
+            target_name = base_name
+            target_dir = root_dir / target_name
+            idx = 2
+            while target_dir.exists():
+                target_name = f"{base_name} {idx}"
+                target_dir = root_dir / target_name
+                idx += 1
 
         try:
+            root_dir.mkdir(parents=True, exist_ok=True)
             shutil.copytree(candidate, target_dir)
         except Exception:
             return False, "copy_failed", target_name

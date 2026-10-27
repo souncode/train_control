@@ -13,27 +13,34 @@ import zipfile
 import tempfile
 import threading
 import subprocess
+import stat
 import struct
 import time
 import socket
 import hmac
 import math
-from datetime import datetime
+import uuid
+from datetime import datetime, timedelta
 from pathlib import Path
 from urllib.request import urlopen
 from urllib.error import URLError, HTTPError
 
-from flask import Flask, jsonify, request, abort, send_file, after_this_request, redirect, url_for
+from flask import Flask, jsonify, request, abort, send_file, after_this_request, redirect, url_for, render_template
+from werkzeug.middleware.proxy_fix import ProxyFix
 
 from tc_auth import (
     clear_auth,
+    current_session_id,
     current_auth_user as auth_current_auth_user,
     get_next_url,
     is_authenticated,
     is_lv2_authenticated,
+    is_lv3_authenticated,
     mark_authenticated,
     mark_lv2_authenticated,
+    mark_lv3_authenticated,
     require_lv2_json,
+    require_lv3_json,
 )
 from tc_notify import (
     build_notifier,
@@ -52,10 +59,16 @@ from tc_config import (
     AUTH_SECRET_KEY,
     BACKUP_COPY_CHUNK_SIZE,
     BACKUP_ROOT,
+    BEHIND_HTTPS_PROXY,
     CONTINUE_IF_ERROR,
     DEFAULT_USER_CREDENTIALS,
     HOST,
+    HTTPS_CERT_FILE,
+    HTTPS_HOSTNAMES,
+    HTTPS_KEY_FILE,
+    HTTPS_PORT,
     LV2_PASSWORD,
+    LV3_PASSWORD,
     OPEN_TRAIN_IN_NEW_TERMINAL,
     PORT,
     PROJECT_LOG_MAX_LINES,
@@ -66,6 +79,7 @@ from tc_config import (
     TRAIN_MONITOR_LOG_TAIL,
     TRAIN_MONITOR_PORT,
     TRAIN_MONITOR_TIMEOUT,
+    USE_HTTPS,
     USER_FILE_NAME,
     WAITRESS_CHANNEL_TIMEOUT,
     WAITRESS_CLEANUP_INTERVAL,
@@ -82,6 +96,8 @@ from tc_dataset import (
     is_valid_project_name,
     load_dataset_config as dataset_load_dataset_config,
     read_shared_dataset_config as dataset_read_shared_dataset_config,
+    remove_tree_best_effort,
+    robust_rmtree,
     save_dataset_config as dataset_save_dataset_config,
     save_uploaded_project_zip as dataset_save_uploaded_project_zip,
     validate_dataset_config as dataset_validate_dataset_config,
@@ -91,10 +107,15 @@ from tc_persistence import (
     append_audit_log as persist_append_audit_log,
     append_train_history_file as persist_append_train_history_file,
     audit_log_file_path as persist_audit_log_file_path,
+    authenticate_user as persist_authenticate_user,
+    create_user_account as persist_create_user_account,
+    delete_user_account as persist_delete_user_account,
+    load_user_accounts as persist_load_user_accounts,
     load_train_history_file as persist_load_train_history_file,
     load_user_credentials as persist_load_user_credentials,
     now_str as persist_now_str,
     save_default_user_file_if_missing as persist_save_default_user_file_if_missing,
+    save_user_accounts as persist_save_user_accounts,
     train_history_file_path as persist_train_history_file_path,
     user_file_path as persist_user_file_path,
     verify_password as persist_verify_password,
@@ -110,6 +131,7 @@ from tc_runtime import (
 )
 
 BASE_DIR = Path(__file__).resolve().parent
+project_notes_lock = threading.Lock()
 
 app = Flask(
     __name__,
@@ -118,9 +140,11 @@ app = Flask(
     static_url_path="/UI"
 )
 app.secret_key = AUTH_SECRET_KEY
+if BEHIND_HTTPS_PROXY:
+    app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_port=1)
 app.config["SESSION_COOKIE_HTTPONLY"] = True
 app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
-app.config["SESSION_COOKIE_SECURE"] = False
+app.config["SESSION_COOKIE_SECURE"] = bool(USE_HTTPS or BEHIND_HTTPS_PROXY)
 app.config["SESSION_REFRESH_EACH_REQUEST"] = False
 app.config["MAX_CONTENT_LENGTH"] = WAITRESS_MAX_REQUEST_BODY_SIZE
 app.config["JSON_AS_ASCII"] = False
@@ -147,6 +171,19 @@ MODEL_TEST_TASK = {
     "id": None,
     "project": "",
     "run_folder": "",
+    "status": "idle",
+    "progress": 0.0,
+    "message": "",
+    "detail": "",
+    "started_at": 0.0,
+    "ended_at": 0.0,
+    "result": None,
+}
+predict_task_lock = threading.Lock()
+PREDICT_TASK = {
+    "id": None,
+    "project": "",
+    "weights_rel": "",
     "status": "idle",
     "progress": 0.0,
     "message": "",
@@ -252,6 +289,70 @@ def train_history_file_path():
     return persist_train_history_file_path(BASE_DIR, TRAIN_HISTORY_FILE_NAME)
 
 
+def project_notes_file_path():
+    return BASE_DIR / "project_notes.json"
+
+
+def load_project_notes_file() -> dict:
+    try:
+        with project_notes_lock:
+            path = project_notes_file_path()
+            if not path.exists():
+                return {}
+            data = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    return {
+        str(k): str(v or "")
+        for k, v in data.items()
+        if str(k or "").strip()
+    }
+
+
+def save_project_notes_file(notes: dict):
+    cleaned = {
+        str(k): str(v or "")
+        for k, v in (notes or {}).items()
+        if str(k or "").strip() and str(v or "").strip()
+    }
+    path = project_notes_file_path()
+    tmp_path = path.with_name(f"{path.name}.{threading.get_ident()}.tmp")
+    payload = json.dumps(cleaned, ensure_ascii=False, indent=2)
+    with project_notes_lock:
+        tmp_path.write_text(payload, encoding="utf-8")
+        os.replace(tmp_path, path)
+
+
+def update_project_note_file(project: str, note: str) -> dict:
+    project = str(project or "").strip()
+    note = str(note or "").strip()
+    path = project_notes_file_path()
+    tmp_path = path.with_name(f"{path.name}.{threading.get_ident()}.tmp")
+    with project_notes_lock:
+        try:
+            data = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+        except Exception:
+            data = {}
+        if not isinstance(data, dict):
+            data = {}
+
+        if note:
+            data[project] = note
+        else:
+            data.pop(project, None)
+
+        cleaned = {
+            str(k): str(v or "")
+            for k, v in data.items()
+            if str(k or "").strip() and str(v or "").strip()
+        }
+        tmp_path.write_text(json.dumps(cleaned, ensure_ascii=False, indent=2), encoding="utf-8")
+        os.replace(tmp_path, path)
+        return cleaned
+
+
 def audit_log_file_path():
     return persist_audit_log_file_path(BASE_DIR, AUDIT_LOG_FILE_NAME)
 
@@ -277,6 +378,7 @@ def write_audit_log(action: str, status: str, project: str = "", target: str = "
     append_audit_log({
         "time": now_str(),
         "user": current_auth_user(),
+        "session_id": current_session_id(),
         "ip": remote_addr,
         "action": str(action or "").strip(),
         "status": str(status or "").strip(),
@@ -284,6 +386,92 @@ def write_audit_log(action: str, status: str, project: str = "", target: str = "
         "target": str(target or "").strip(),
         "details": str(details or "").strip(),
     })
+
+
+def load_audit_log_items(max_items: int = 500, session_only: bool = True):
+    p = audit_log_file_path()
+    if not p.exists() or not p.is_file():
+        return []
+
+    current_sid = current_session_id()
+    rows = []
+    try:
+        with p.open("r", encoding="utf-8") as f:
+            for line in f:
+                raw = str(line or "").strip()
+                if not raw:
+                    continue
+                try:
+                    data = json.loads(raw)
+                except Exception:
+                    continue
+                if not isinstance(data, dict):
+                    continue
+                sid = str(data.get("session_id", "") or "").strip()
+                if session_only and current_sid and sid and sid != current_sid:
+                    continue
+                if session_only and current_sid and not sid:
+                    continue
+                rows.append({
+                    "time": str(data.get("time", "") or "").strip(),
+                    "user": str(data.get("user", "") or "").strip(),
+                    "session_id": sid,
+                    "ip": str(data.get("ip", "") or "").strip(),
+                    "action": str(data.get("action", "") or "").strip(),
+                    "status": str(data.get("status", "") or "").strip(),
+                    "project": str(data.get("project", "") or "").strip(),
+                    "target": str(data.get("target", "") or "").strip(),
+                    "details": str(data.get("details", "") or "").strip(),
+                })
+    except Exception:
+        return []
+
+    return rows[-max(1, int(max_items or 500)):]
+
+
+def restart_current_server_soon(delay_seconds: float = 1.0):
+    def _restart():
+        time.sleep(max(0.2, float(delay_seconds or 1.0)))
+        try:
+            restart_waitress = BASE_DIR / "restart_waitress.cmd"
+            start_waitress = restart_waitress if restart_waitress.exists() else BASE_DIR / "start_waitress.cmd"
+            if os.name == "nt" and start_waitress.exists():
+                creationflags = 0
+                if hasattr(subprocess, "CREATE_NEW_CONSOLE"):
+                    creationflags |= subprocess.CREATE_NEW_CONSOLE
+                if hasattr(subprocess, "CREATE_NEW_PROCESS_GROUP"):
+                    creationflags |= subprocess.CREATE_NEW_PROCESS_GROUP
+                subprocess.Popen(
+                    [
+                        "cmd.exe",
+                        "/c",
+                        str(start_waitress),
+                    ],
+                    cwd=str(BASE_DIR),
+                    close_fds=False,
+                    creationflags=creationflags,
+                )
+            else:
+                argv = list(sys.argv or [])
+                if argv:
+                    script = Path(argv[0])
+                    if not script.is_absolute():
+                        argv[0] = str((BASE_DIR / script).resolve())
+                else:
+                    argv = [str(Path(__file__).resolve())]
+
+                cmd = [sys.executable] + argv
+                kwargs = {
+                    "cwd": str(BASE_DIR),
+                    "close_fds": False,
+                }
+                if os.name == "nt" and hasattr(subprocess, "CREATE_NEW_PROCESS_GROUP"):
+                    kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
+                subprocess.Popen(cmd, **kwargs)
+        finally:
+            os._exit(0)
+
+    threading.Thread(target=_restart, daemon=True).start()
 
 
 def save_default_user_file_if_missing():
@@ -313,6 +501,22 @@ def record_train_history_locked(project_name: str, status: str, returncode=None,
 
 def load_user_credentials():
     return persist_load_user_credentials(BASE_DIR, USER_FILE_NAME, DEFAULT_USER_CREDENTIALS)
+
+
+def load_user_accounts():
+    return persist_load_user_accounts(BASE_DIR, USER_FILE_NAME, DEFAULT_USER_CREDENTIALS)
+
+
+def authenticate_user(username: str, password: str):
+    return persist_authenticate_user(BASE_DIR, USER_FILE_NAME, DEFAULT_USER_CREDENTIALS, username, password)
+
+
+def create_user_account(username: str, password: str):
+    return persist_create_user_account(BASE_DIR, USER_FILE_NAME, DEFAULT_USER_CREDENTIALS, username, password)
+
+
+def delete_user_account(username: str):
+    return persist_delete_user_account(BASE_DIR, USER_FILE_NAME, DEFAULT_USER_CREDENTIALS, username)
 
 
 def verify_password(password: str, creds: dict):
@@ -554,7 +758,10 @@ def ensure_project_state(project_name):
             "last_returncode": None,
             "last_log": [],
             "pid": None,
+            "note": "",
         }
+    else:
+        STATE["projects"][project_name].setdefault("note", "")
     return STATE["projects"][project_name]
 
 
@@ -568,6 +775,7 @@ def project_state_public(p: dict):
         "last_end": p.get("last_end"),
         "last_returncode": p.get("last_returncode"),
         "pid": p.get("pid"),
+        "note": p.get("note", ""),
     }
 
 
@@ -609,7 +817,7 @@ def is_current_train_stop_requested(project_name: str) -> bool:
         )
 
 
-def find_project_train_pids(project_path: Path):
+def find_project_train_pids(project_path: Path, include_launcher: bool = True):
     pids = set()
     if not sys.platform.startswith("win"):
         return pids
@@ -617,10 +825,11 @@ def find_project_train_pids(project_path: Path):
     project_path = project_path.resolve()
     train_script = str((project_path / TRAIN_FILE).resolve()).replace("'", "''")
     launcher_path = str((project_path / "_train_launcher.cmd").resolve()).replace("'", "''")
+    launcher_match = f" -or ($_.CommandLine -like '*{launcher_path}*')" if include_launcher else ""
     command = (
         "Get-CimInstance Win32_Process | "
         "Where-Object { $_.CommandLine -and "
-        f"(($_.CommandLine -like '*{train_script}*') -or ($_.CommandLine -like '*{launcher_path}*')) }} | "
+        f"(($_.Name -match '^python(?:w)?\\.exe$' -and $_.CommandLine -like '*{train_script}*'){launcher_match}) }} | "
         "Select-Object -ExpandProperty ProcessId"
     )
     try:
@@ -724,7 +933,6 @@ def create_train_launcher_cmd(project_path: Path, python_exe: str, script_file: 
         "if not \"%RC%\"==\"0\" (",
         "  echo.",
         "  echo Train failed with RC=%RC%",
-        "  pause",
         ")",
         "exit /b %RC%",
         ""
@@ -767,12 +975,16 @@ def get_projects(root_dir: Path):
 
 def scan_projects():
     projects = get_projects(ROOT_DIR)
+    notes = load_project_notes_file()
     with state_lock:
         known_names = set()
         for p in projects:
             known_names.add(p.name)
+            already_known = p.name in STATE["projects"]
             info = ensure_project_state(p.name)
             info["path"] = str(p)
+            if not already_known:
+                info["note"] = str(notes.get(p.name, "") or "")
 
         stale_names = []
         for name, info in STATE["projects"].items():
@@ -872,6 +1084,190 @@ def queue_all():
             skipped.append(name)
 
     return added, skipped
+
+
+def rebuild_train_queue_from_state_locked():
+    pending = list(STATE.get("queue") or [])
+    try:
+        with train_queue.mutex:
+            train_queue.queue.clear()
+            for name in pending:
+                train_queue.queue.append(name)
+            train_queue.not_empty.notify_all()
+    except Exception:
+        while True:
+            try:
+                train_queue.get_nowait()
+                try:
+                    train_queue.task_done()
+                except Exception:
+                    pass
+            except queue.Empty:
+                break
+        for name in pending:
+            train_queue.put(name)
+
+
+def reorder_queued_project(project_name, direction):
+    project_name = str(project_name or "").strip()
+    direction = str(direction or "").strip().lower()
+    if direction not in ("up", "down"):
+        return False, "Invalid direction"
+
+    with state_lock:
+        queue_list = list(STATE.get("queue") or [])
+        if project_name not in queue_list:
+            return False, f"{project_name} is not in queue"
+
+        idx = queue_list.index(project_name)
+        target_idx = idx - 1 if direction == "up" else idx + 1
+        if target_idx < 0 or target_idx >= len(queue_list):
+            return False, "Project is already at this priority"
+
+        queue_list[idx], queue_list[target_idx] = queue_list[target_idx], queue_list[idx]
+        STATE["queue"] = queue_list
+        rebuild_train_queue_from_state_locked()
+        sync_queue_session_file_locked()
+        bump_state_version_locked()
+
+    return True, f"Updated priority for {project_name}"
+
+
+def restore_saved_current_project_locked(project_name: str) -> bool:
+    project_name = str(project_name or "").strip()
+    if not project_name:
+        return False
+
+    p = ensure_project_state(project_name)
+    project_path_raw = str(p.get("path") or "").strip()
+    if not project_path_raw:
+        return False
+
+    try:
+        project_path = Path(project_path_raw).resolve()
+    except Exception:
+        return False
+
+    monitor_status = MONITOR_CACHE.get("status") or {}
+    monitor_project_name = str(MONITOR_CACHE.get("matched_project_name") or monitor_status.get("project_name") or "").strip()
+    monitor_project_dir = str(monitor_status.get("project_dir") or "").strip()
+    monitor_is_training = bool(monitor_status.get("is_training", False))
+    monitor_matches = False
+
+    if monitor_is_training:
+        if monitor_project_name and monitor_project_name.strip().lower() == project_name.lower():
+            monitor_matches = True
+        elif monitor_project_dir:
+            try:
+                monitor_matches = str(Path(monitor_project_dir).resolve()).lower() == str(project_path).lower()
+            except Exception:
+                monitor_matches = False
+
+    has_train_pid = bool(find_project_train_pids(project_path, include_launcher=False))
+    if monitor_matches or has_train_pid:
+        STATE["current"] = project_name
+        p["status"] = "running"
+        p["progress"] = float(p.get("progress", 0.0) or 0.0)
+        p["pid"] = None
+        if not p.get("last_start"):
+            p["last_start"] = now_str()
+        if project_name in STATE["queue"]:
+            STATE["queue"].remove(project_name)
+        sync_queue_session_file_locked()
+        bump_state_version_locked()
+        start_recovered_current_watcher(project_name, project_path)
+        return True
+
+    final_status, returncode = infer_completed_project_status(project_path)
+    p["status"] = final_status
+    p["progress"] = 100.0 if final_status == "success" else 0.0
+    p["last_end"] = now_str()
+    p["last_returncode"] = returncode
+    p["pid"] = None
+    if str(STATE.get("current") or "") == project_name:
+        STATE["current"] = None
+    record_train_history_locked(project_name, final_status, returncode)
+    bump_state_version_locked()
+
+    return False
+
+
+def finish_recovered_current_project(project_name: str, rc: int | None = None):
+    project_name = str(project_name or "").strip()
+    if not project_name:
+        return
+
+    with state_lock:
+        info = STATE["projects"].get(project_name)
+        if not info:
+            return
+        if str(info.get("status") or "").strip() != "running" and str(STATE.get("current") or "").strip() != project_name:
+            return
+
+        project_path_raw = str(info.get("path") or "").strip()
+        if project_path_raw:
+            try:
+                inferred_status, inferred_rc = infer_completed_project_status(Path(project_path_raw).resolve())
+            except Exception:
+                inferred_status, inferred_rc = "stopped", -15
+        else:
+            inferred_status, inferred_rc = "stopped", -15
+
+        if rc is None:
+            rc = inferred_rc
+
+        if int(rc) == 0:
+            final_status = "success"
+            final_rc = 0
+        elif int(rc) == -15:
+            final_status = inferred_status if inferred_status == "success" else "stopped"
+            final_rc = inferred_rc if inferred_status == "success" else -15
+        else:
+            final_status = inferred_status if inferred_status == "success" else "failed"
+            final_rc = inferred_rc if inferred_status == "success" else int(rc)
+
+        info["status"] = final_status
+        info["progress"] = 100.0 if final_status == "success" else 0.0
+        info["last_end"] = now_str()
+        info["last_returncode"] = final_rc
+        info["pid"] = None
+        info["last_log"].append(f"[{now_str()}] TRAIN RECOVERED AFTER APP RESTART: {final_status}, rc={final_rc}")
+
+        if str(STATE.get("current") or "").strip() == project_name:
+            STATE["current"] = None
+
+        history = STATE.get("history") or []
+        last_history = history[-1] if history else None
+        if not (
+            isinstance(last_history, dict)
+            and str(last_history.get("project") or "") == project_name
+            and str(last_history.get("status") or "") == final_status
+        ):
+            record_train_history_locked(project_name, final_status, final_rc)
+
+        sync_queue_session_file_locked()
+        bump_state_version_locked()
+
+    mark_current_train_control(None, None, pid=None, stop_requested=False)
+    notify_train_finished(project_name, final_status, final_rc)
+    start_worker_if_needed()
+
+
+def start_recovered_current_watcher(project_name: str, project_path: Path):
+    def _watch():
+        mark_current_train_control(project_name, project_path, pid=None, stop_requested=False)
+        try:
+            rc = wait_train_completion_from_monitor(
+                project_name,
+                project_path,
+                process=None,
+                assume_started=True,
+            )
+        except Exception:
+            rc = None
+        finish_recovered_current_project(project_name, rc)
+
+    threading.Thread(target=_watch, daemon=True).start()
 
 
 def retry_failed_projects():
@@ -1174,45 +1570,22 @@ def normalize_bbox_class_name(name: str):
     return cleaned or raw
 
 
-def invalidate_project_bbox_analysis(project_name: str):
-    key = str(project_name or "").strip()
-    if not key:
-        return
-    with bbox_analysis_cache_lock:
-        BBOX_ANALYSIS_CACHE.pop(key, None)
+def enrich_yolo_rows_with_class_info(rows: list, class_names: list):
+    enriched = []
+    for row in rows or []:
+        clean_row = dict(row or {})
+        cls = int(clean_row.get("cls", -1))
+        cls_name = class_names[cls] if 0 <= cls < len(class_names) else f"class_{cls}"
+        clean_row["cls_name"] = cls_name
+        clean_row["group_name"] = normalize_bbox_class_name(cls_name)
+        enriched.append(clean_row)
+    return enriched
 
 
-def build_project_bbox_analysis(project_name: str):
-    project_path = resolve_project_path(project_name)
-    if not project_path or not project_path.exists():
-        return {
-            "project": project_name,
-            "class_stats": {},
-            "images": {},
-        }
-
-    _, rel_images = list_project_images(project_path, limit=0)
-    class_names, _ = load_project_classes(project_path)
-    image_rows = {}
+def build_bbox_group_stats_from_images(image_rows: dict):
     group_values = {}
-
-    for rel in rel_images:
-        label_file, _ = resolve_label_file_for_image(project_name, rel, create_missing=False)
-        text = ""
-        if label_file and label_file.exists() and label_file.is_file():
-            try:
-                text = label_file.read_text(encoding="utf-8")
-            except Exception:
-                text = ""
-        rows = parse_yolo_label_rows(text)
-        for row in rows:
-            cls = int(row.get("cls", -1))
-            cls_name = class_names[cls] if 0 <= cls < len(class_names) else f"class_{cls}"
-            group_name = normalize_bbox_class_name(cls_name)
-            row["cls_name"] = cls_name
-            row["group_name"] = group_name
-        image_rows[rel] = rows
-        for row in rows:
+    for rows in (image_rows or {}).values():
+        for row in rows or []:
             group_name = str(row.get("group_name", "") or "")
             bucket = group_values.setdefault(group_name, {"cx": [], "cy": [], "w": [], "h": []})
             bucket["cx"].append(float(row["cx"]))
@@ -1234,6 +1607,41 @@ def build_project_bbox_analysis(project_name: str):
             stat_row[f"{metric_name}_mean"] = mean
             stat_row[f"{metric_name}_std"] = math.sqrt(max(0.0, variance))
         group_stats[group_name] = stat_row
+    return group_stats
+
+
+def invalidate_project_bbox_analysis(project_name: str):
+    key = str(project_name or "").strip()
+    if not key:
+        return
+    with bbox_analysis_cache_lock:
+        BBOX_ANALYSIS_CACHE.pop(key, None)
+
+
+def build_project_bbox_analysis(project_name: str):
+    project_path = resolve_project_path(project_name)
+    if not project_path or not project_path.exists():
+        return {
+            "project": project_name,
+            "class_stats": {},
+            "images": {},
+        }
+
+    _, rel_images = list_project_images(project_path, limit=0)
+    class_names, _ = load_project_classes(project_path)
+    image_rows = {}
+
+    for rel in rel_images:
+        label_file, _ = resolve_label_file_for_image(project_name, rel, create_missing=False)
+        text = ""
+        if label_file and label_file.exists() and label_file.is_file():
+            try:
+                text = label_file.read_text(encoding="utf-8")
+            except Exception:
+                text = ""
+        image_rows[rel] = enrich_yolo_rows_with_class_info(parse_yolo_label_rows(text), class_names)
+
+    group_stats = build_bbox_group_stats_from_images(image_rows)
 
     images = {}
     for rel, rows in image_rows.items():
@@ -1248,6 +1656,34 @@ def build_project_bbox_analysis(project_name: str):
         "group_stats": group_stats,
         "images": images,
     }
+
+
+def update_project_bbox_analysis_image(project_name: str, rel: str, text: str):
+    key = str(project_name or "").strip()
+    rel_key = str(rel or "").strip().replace("\\", "/")
+    if not key or not rel_key:
+        return
+
+    with bbox_analysis_cache_lock:
+        cached = BBOX_ANALYSIS_CACHE.get(key)
+        if cached is None:
+            return
+        class_names = list(cached.get("class_names") or [])
+        raw_images = dict(cached.get("images") or {})
+        image_rows = {
+            image_rel: list((info or {}).get("rows") or [])
+            for image_rel, info in raw_images.items()
+        }
+        rows = enrich_yolo_rows_with_class_info(parse_yolo_label_rows(text), class_names)
+        image_rows[rel_key] = rows
+        cached["images"] = {
+            image_rel: {
+                "bbox_count": len(rows_for_image or []),
+                "rows": rows_for_image or [],
+            }
+            for image_rel, rows_for_image in image_rows.items()
+        }
+        cached["group_stats"] = build_bbox_group_stats_from_images(image_rows)
 
 
 def evaluate_bbox_image_anomalies(group_stats: dict, image_info: dict, sensitivity: str = "medium"):
@@ -1634,6 +2070,55 @@ def split_dataset_rows_by_class(image_rows: list, clean_cfg: dict):
     return buckets
 
 
+def split_dataset_rows_for_train_all(image_rows: list, clean_cfg: dict, split_mode: str = "count"):
+    rows = list(image_rows)
+    if clean_cfg.get("shuffle", True):
+        random.Random(int(clean_cfg.get("seed", 42))).shuffle(rows)
+
+    if str(split_mode or "").strip().lower() == "class":
+        groups = {}
+        for row in rows:
+            key = int(row.get("primary_class", -1))
+            groups.setdefault(key, []).append(row)
+
+        class_keys = sorted(groups.keys())
+        if clean_cfg.get("shuffle", True):
+            random.Random(int(clean_cfg.get("seed", 42))).shuffle(class_keys)
+
+        total_groups = len(class_keys)
+        valid_group_count = int(round(total_groups * clean_cfg["valid_percent"] / 100.0))
+        test_group_count = int(round(total_groups * clean_cfg["test_percent"] / 100.0))
+        valid_group_count = max(0, min(valid_group_count, total_groups))
+        test_group_count = max(0, min(test_group_count, total_groups - valid_group_count))
+
+        valid_keys = class_keys[:valid_group_count]
+        test_keys = class_keys[valid_group_count:valid_group_count + test_group_count]
+        valid_rows = []
+        test_rows = []
+        for key in valid_keys:
+            valid_rows.extend(groups.get(key, []))
+        for key in test_keys:
+            test_rows.extend(groups.get(key, []))
+
+        return {
+            "train": rows,
+            "valid": valid_rows,
+            "test": test_rows,
+        }
+
+    total = len(rows)
+    valid_count = int(round(total * clean_cfg["valid_percent"] / 100.0))
+    test_count = int(round(total * clean_cfg["test_percent"] / 100.0))
+    valid_count = max(0, min(valid_count, total))
+    test_count = max(0, min(test_count, total - valid_count))
+
+    return {
+        "train": rows,
+        "valid": rows[:valid_count],
+        "test": rows[valid_count:valid_count + test_count],
+    }
+
+
 def create_dataset_for_project(project_name: str, cfg: dict, split_mode: str = "count", progress_cb=None):
     ok, err, clean_cfg = validate_dataset_config(cfg)
     if not ok:
@@ -1656,7 +2141,9 @@ def create_dataset_for_project(project_name: str, cfg: dict, split_mode: str = "
             pass
 
     split_mode = str(split_mode or "count").strip().lower()
-    if split_mode == "class":
+    if clean_cfg.get("train_all_data"):
+        buckets = split_dataset_rows_for_train_all(image_rows, clean_cfg, split_mode=split_mode)
+    elif split_mode == "class":
         buckets = split_dataset_rows_by_class(image_rows, clean_cfg)
     else:
         buckets = split_dataset_rows_by_count(image_rows, clean_cfg)
@@ -1791,36 +2278,66 @@ def merge_train_valid_to_train(project_name: str, progress_cb=None):
             pass
 
     train_root = project_path / "train"
-    if train_root.exists() and train_root.is_dir():
-        if callable(progress_cb):
-            try:
-                progress_cb(26.0, "Removing old train folder", str(train_root))
-            except Exception:
-                pass
-        shutil.rmtree(train_root)
-
-    img_dst_root = train_root / "images"
-    lbl_dst_root = train_root / "labels"
+    temp_root = Path(tempfile.mkdtemp(prefix="_train_all_data_", dir=str(project_path)))
+    img_dst_root = temp_root / "images"
+    lbl_dst_root = temp_root / "labels"
     img_dst_root.mkdir(parents=True, exist_ok=True)
     lbl_dst_root.mkdir(parents=True, exist_ok=True)
 
-    copied = 0
-    total_copy = len(source_rows)
-    for row in source_rows:
-        rel_path = Path(row["rel"])
-        img_dst = img_dst_root / rel_path
-        lbl_dst = (lbl_dst_root / rel_path).with_suffix(".txt")
-        img_dst.parent.mkdir(parents=True, exist_ok=True)
-        lbl_dst.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(row["image_file"], img_dst)
-        shutil.copy2(row["label_file"], lbl_dst)
-        copied += 1
+    try:
+        copied = 0
+        total_copy = len(source_rows)
+        for row in source_rows:
+            rel_path = Path(row["rel"])
+            img_dst = img_dst_root / rel_path
+            lbl_dst = (lbl_dst_root / rel_path).with_suffix(".txt")
+            img_dst.parent.mkdir(parents=True, exist_ok=True)
+            lbl_dst.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(row["image_file"], img_dst)
+            shutil.copy2(row["label_file"], lbl_dst)
+            copied += 1
+            if callable(progress_cb):
+                try:
+                    pct = 34.0 + ((float(copied) / max(1.0, float(total_copy or 1))) * 50.0)
+                    progress_cb(pct, f"Merging train data: {copied}/{total_copy}", rel_path.as_posix())
+                except Exception:
+                    pass
+
+        if train_root.exists() and train_root.is_dir():
+            if callable(progress_cb):
+                try:
+                    progress_cb(88.0, "Replacing old train folder", str(train_root))
+                except Exception:
+                    pass
+            shutil.rmtree(train_root)
+        temp_root.replace(train_root)
+
         if callable(progress_cb):
             try:
-                pct = 34.0 + ((float(copied) / max(1.0, float(total_copy or 1))) * 62.0)
-                progress_cb(pct, f"Merging train data: {copied}/{total_copy}", rel_path.as_posix())
+                progress_cb(94.0, "Writing data.yaml", project_name)
             except Exception:
                 pass
+
+        classes, _ = load_project_classes(project_path)
+        data_yaml = {
+            "path": str(project_path),
+            "train": "train/images",
+            "val": "valid/images",
+            "test": "test/images",
+            "nc": len(classes),
+            "names": classes,
+        }
+        try:
+            import yaml
+            (project_path / "data.yaml").write_text(
+                yaml.safe_dump(data_yaml, allow_unicode=True, sort_keys=False),
+                encoding="utf-8"
+            )
+        except Exception as e:
+            return False, f"Không ghi được data.yaml: {e}", None
+    except Exception as e:
+        shutil.rmtree(temp_root, ignore_errors=True)
+        return False, f"Không gộp được train all data: {e}", None
 
     return True, "Đã gộp train + valid vào train", {
         "counts": {
@@ -1840,7 +2357,7 @@ def find_output_dir(project_path: Path):
 
 
 def save_uploaded_project_zip(upload_file):
-    return dataset_save_uploaded_project_zip(upload_file, BASE_DIR, safe_project_name_part)
+    return dataset_save_uploaded_project_zip(upload_file, ROOT_DIR, safe_project_name_part)
 
 
 def import_project_data_zip(project_name: str, upload_file):
@@ -1927,48 +2444,168 @@ def import_project_data_zip(project_name: str, upload_file):
     }
 
 
+def _unique_upload_target(folder: Path, filename: str) -> Path:
+    safe_name = safe_download_part(Path(str(filename or "")).name)
+    suffix = Path(safe_name).suffix
+    if not suffix:
+        safe_name = f"{safe_name}.jpg"
+        suffix = ".jpg"
+    stem = Path(safe_name).stem or "image"
+    candidate = (folder / safe_name).resolve()
+    idx = 2
+    while candidate.exists():
+        candidate = (folder / f"{stem}_{idx}{suffix}").resolve()
+        idx += 1
+    return candidate
+
+
+def import_project_data_images(project_name: str, upload_files):
+    project_path = resolve_project_path(project_name)
+    if not project_path or not project_path.exists():
+        return False, "project_not_found", None
+
+    image_dir = find_project_image_dir(project_path)
+    if not image_dir:
+        image_dir = project_path / "image"
+        try:
+            image_dir.mkdir(parents=True, exist_ok=True)
+        except Exception:
+            return False, "cannot_create_image_dir", None
+
+    files = [f for f in list(upload_files or []) if f and str(getattr(f, "filename", "") or "").strip()]
+    if not files:
+        return False, "missing_file", None
+
+    copied_images = 0
+    skipped_files = 0
+    saved_names = []
+    for upload_file in files:
+        filename = str(upload_file.filename or "").strip()
+        suffix = Path(filename).suffix.lower()
+        if suffix not in IMAGE_EXTS:
+            skipped_files += 1
+            continue
+
+        dst = _unique_upload_target(image_dir, filename)
+        if not is_path_inside(dst, image_dir):
+            return False, "invalid_upload_path", None
+        try:
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            upload_file.save(str(dst))
+            copied_images += 1
+            if len(saved_names) < 20:
+                saved_names.append(dst.name)
+        except Exception:
+            return False, "copy_failed", None
+
+    if copied_images <= 0:
+        return False, "no_image_found", {"skipped_files": skipped_files}
+
+    return True, "imported", {
+        "project": project_name,
+        "images_added": copied_images,
+        "labels_added": 0,
+        "skipped_files": skipped_files,
+        "image_dir": str(image_dir),
+        "saved_names": saved_names,
+    }
+
+
 def get_output_model_train_weights_info(project_path: Path):
     output_dir = find_output_dir(project_path)
-    if not output_dir:
-        return {
-            "exists": False,
-            "folder": None,
-            "model_train_folders": [],
-            "items": []
-        }
-
-    model_train_dirs = [
-        d for d in sorted(output_dir.iterdir(), key=lambda p: p.name.lower())
-        if d.is_dir() and d.name.lower().startswith("model_train")
-    ]
+    model_train_dirs = []
+    if output_dir:
+        model_train_dirs = [
+            d for d in sorted(output_dir.iterdir(), key=lambda p: p.name.lower())
+            if d.is_dir() and d.name.lower().startswith("model_train")
+        ]
 
     rows = []
-    for run_dir in model_train_dirs:
-        weights_dir = run_dir / "weights"
-        if not weights_dir.exists() or not weights_dir.is_dir():
-            continue
-        for f in weights_dir.rglob("*"):
-            if f.is_file():
-                st = f.stat()
-                rows.append({
-                    "run_folder": run_dir.name,
-                    "file_name": f.name,
-                    "relative_path": f.relative_to(output_dir).as_posix(),
-                    "modified_at": datetime.fromtimestamp(st.st_mtime).strftime("%Y-%m-%d %H:%M:%S"),
-                    "size_kb": round(st.st_size / 1024, 2),
-                    "_sort_ts": st.st_mtime
-                })
+    seen_paths = set()
+
+    def _is_yolo_base_model(path: Path) -> bool:
+        name = path.name.lower()
+        return name.startswith("yolo") and name.endswith(".pt")
+
+    def _append_model_file(file_path: Path, source_label: str = ""):
+        try:
+            resolved = file_path.resolve()
+            if resolved in seen_paths:
+                return
+            if not resolved.is_file() or resolved.suffix.lower() != ".pt":
+                return
+            if _is_yolo_base_model(resolved):
+                return
+            if not is_path_inside(resolved, project_path):
+                return
+            st = resolved.stat()
+            rel_project = resolved.relative_to(project_path).as_posix()
+            run_folder = source_label
+            if not run_folder:
+                parent = resolved.parent
+                run_folder = parent.parent.name if parent.name.lower() == "weights" else parent.name
+            rows.append({
+                "run_folder": run_folder,
+                "file_name": resolved.name,
+                "relative_path": rel_project,
+                "project_relative_path": rel_project,
+                "modified_at": datetime.fromtimestamp(st.st_mtime).strftime("%Y-%m-%d %H:%M:%S"),
+                "modified_ts": st.st_mtime,
+                "size_kb": round(st.st_size / 1024, 2),
+                "_sort_ts": st.st_mtime
+            })
+            seen_paths.add(resolved)
+        except Exception:
+            return
+
+    if output_dir:
+        for run_dir in model_train_dirs:
+            weights_dir = run_dir / "weights"
+            if not weights_dir.exists() or not weights_dir.is_dir():
+                continue
+            for f in weights_dir.rglob("*.pt"):
+                _append_model_file(f, run_dir.name)
+
+    try:
+        skip_dirs = {"train", "valid", "test", "runs", "__pycache__"}
+        for root, dir_names, file_names in os.walk(project_path):
+            current = Path(root)
+            dir_names[:] = [
+                d for d in dir_names
+                if d.lower() not in skip_dirs and not d.startswith("_train_all_data_")
+            ]
+            for file_name in file_names:
+                if not file_name.lower().endswith(".pt"):
+                    continue
+                _append_model_file(current / file_name)
+    except Exception:
+        pass
 
     rows.sort(key=lambda x: x["_sort_ts"], reverse=True)
     for row in rows:
         row.pop("_sort_ts", None)
 
     return {
-        "exists": True,
-        "folder": output_dir.name,
+        "exists": bool(output_dir) or bool(rows),
+        "folder": output_dir.name if output_dir else None,
         "model_train_folders": [d.name for d in model_train_dirs],
         "items": rows
     }
+
+
+def find_latest_best_weight_rel(project_name: str):
+    project_path = resolve_project_path(project_name)
+    if not project_path or not project_path.exists():
+        return None, "Project not found"
+
+    output_info = get_output_model_train_weights_info(project_path)
+    for item in list(output_info.get("items") or []):
+        if str(item.get("file_name") or "").lower() == "best.pt":
+            rel = str(item.get("relative_path") or item.get("project_relative_path") or "").strip().replace("\\", "/")
+            if rel:
+                return rel, None
+
+    return None, "No best.pt found"
 
 
 def read_results_csv_preview(csv_file: Path, max_rows: int = 200):
@@ -2533,29 +3170,19 @@ def resolve_weight_download_file(project_name: str, relative_path: str):
     if not project_path or not project_path.exists():
         return None, "project_not_found"
 
-    output_dir = find_output_dir(project_path)
-    if not output_dir:
-        return None, "output_not_found"
+    rel = str(relative_path or "").strip().replace("\\", "/")
+    if not rel:
+        return None, "missing_path"
 
-    candidate = (output_dir / relative_path).resolve()
-
-    if not is_path_inside(candidate, output_dir):
+    candidate = (project_path / rel).resolve()
+    if not is_path_inside(candidate, project_path):
         return None, "invalid_path"
-
     if not candidate.exists() or not candidate.is_file():
         return None, "file_not_found"
-
-    try:
-        rel_parts = candidate.relative_to(output_dir).parts
-    except Exception:
-        return None, "invalid_path"
-
-    if len(rel_parts) < 2:
-        return None, "invalid_output_file_path"
-
-    run_folder = rel_parts[0]
-    if not run_folder.lower().startswith("model_train"):
-        return None, "invalid_run_folder"
+    if candidate.suffix.lower() != ".pt":
+        return None, "not_pt_file"
+    if candidate.name.lower().startswith("yolo"):
+        return None, "yolo_base_model_hidden"
 
     return candidate, None
 
@@ -2574,6 +3201,13 @@ def resolve_output_file(project_name: str, relative_path: str):
         return None, "invalid_path"
     if not candidate.exists() or not candidate.is_file():
         return None, "file_not_found"
+    return candidate, None
+
+
+def resolve_output_weight_file(project_name: str, relative_path: str):
+    candidate, err = resolve_weight_download_file(project_name, relative_path)
+    if err or not candidate:
+        return None, err or "file_not_found"
     return candidate, None
 
 
@@ -2643,6 +3277,14 @@ def build_model_test_status_payload():
         }
 
 
+def build_predict_status_payload():
+    with predict_task_lock:
+        return {
+            "ok": True,
+            **dict(PREDICT_TASK),
+        }
+
+
 def build_project_fs_task_status_payload():
     with project_fs_task_lock:
         return {
@@ -2665,6 +3307,10 @@ def _set_revalidate_task_locked(**kwargs):
 
 def _set_model_test_task_locked(**kwargs):
     MODEL_TEST_TASK.update(kwargs)
+
+
+def _set_predict_task_locked(**kwargs):
+    PREDICT_TASK.update(kwargs)
 
 
 def _set_project_fs_task_locked(**kwargs):
@@ -2897,12 +3543,17 @@ def _read_yolo_label_rows(text: str):
             h = float(parts[4])
         except Exception:
             continue
+        try:
+            confidence = float(parts[5]) if len(parts) > 5 else None
+        except (ValueError, TypeError):
+            confidence = None
         rows.append({
             "cls": cls,
             "cx": cx,
             "cy": cy,
             "w": w,
             "h": h,
+            **({"confidence": confidence} if confidence is not None else {}),
         })
     return rows
 
@@ -2989,6 +3640,392 @@ def _collect_msa_sample_pairs(sample_root: Path):
     return pairs
 
 
+def msa_root_for_project(project_name: str):
+    project_path = resolve_project_path(project_name)
+    if not project_path or not project_path.is_dir():
+        return None
+    return project_path / "MSA"
+
+
+def list_msa_models(project_name: str):
+    project_path = resolve_project_path(project_name)
+    output_dir = find_output_dir(project_path) if project_path else None
+    if not output_dir:
+        return []
+    models = []
+    for run_dir in sorted(output_dir.iterdir(), key=lambda p: p.name.lower()):
+        if not run_dir.is_dir():
+            continue
+        for name in ("best.pt", "last.pt"):
+            if (run_dir / "weights" / name).is_file():
+                models.append({"run_folder": run_dir.name, "weight": name})
+    return models
+
+
+def import_msa_zip(project_name: str, upload_file, progress_cb=None):
+    msa_root = msa_root_for_project(project_name)
+    if msa_root is None:
+        return False, "Project not found", None
+    with tempfile.TemporaryDirectory(prefix="msa_import_") as tmp_name:
+        tmp_root = Path(tmp_name)
+        try:
+            zip_path = tmp_root / "upload.zip"
+            if isinstance(upload_file, Path):
+                shutil.copy2(upload_file, zip_path)
+            else:
+                upload_file.save(str(zip_path))
+            with zipfile.ZipFile(zip_path) as archive:
+                files = [entry for entry in archive.infolist() if not entry.is_dir()]
+                if len(files) > 20000 or sum(entry.file_size for entry in files) > 2 * 1024**3:
+                    return False, "MSA ZIP is too large", None
+                if progress_cb:
+                    progress_cb(5, "Kiểm tra ZIP", 0, len(files))
+                for index, entry in enumerate(files, 1):
+                    parts = Path(entry.filename.replace("\\", "/")).parts
+                    if not parts or entry.filename.startswith("/") or ".." in parts or ":" in parts[0]:
+                        return False, "Invalid ZIP path", None
+                    suffix = Path(parts[-1]).suffix.lower()
+                    if suffix not in IMAGE_EXTS and suffix != ".txt":
+                        continue
+                    target = (tmp_root / Path(*parts)).resolve()
+                    if not is_path_inside(target, tmp_root):
+                        return False, "Invalid ZIP path", None
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    with archive.open(entry) as source, target.open("wb") as dest:
+                        shutil.copyfileobj(source, dest)
+                    if progress_cb:
+                        progress_cb(5 + round(65 * index / max(1, len(files))), "Giải nén ZIP", index, len(files))
+        except (zipfile.BadZipFile, OSError, ValueError) as exc:
+            return False, f"Cannot read MSA ZIP: {exc}", None
+
+        image_files = {}
+        label_files = {}
+        for path in tmp_root.rglob("*"):
+            if not path.is_file():
+                continue
+            if path.suffix.lower() in IMAGE_EXTS:
+                image_files[path.stem] = path
+            elif path.suffix.lower() == ".txt":
+                label_files[path.stem] = path
+        if not image_files:
+            return False, "ZIP must contain MSA images", None
+        image_dir = msa_root / "images"
+        label_dir = msa_root / "labels"
+        image_dir.mkdir(parents=True, exist_ok=True)
+        label_dir.mkdir(parents=True, exist_ok=True)
+        for stem, image_path in image_files.items():
+            for old_image in image_dir.glob(f"{stem}.*"):
+                if old_image.suffix.lower() in IMAGE_EXTS and old_image.name != image_path.name:
+                    return False, f"Image name already exists with another extension: {stem}", None
+        labeled = 0
+        for index, (stem, image_path) in enumerate(sorted(image_files.items()), 1):
+            shutil.copy2(image_path, image_dir / image_path.name)
+            label_path = label_files.get(stem)
+            if label_path:
+                shutil.copy2(label_path, label_dir / f"{stem}.txt")
+                labeled += 1
+            if progress_cb:
+                progress_cb(70 + round(30 * index / len(image_files)), "Nhập mẫu MSA", index, len(image_files))
+        return True, f"Imported {len(image_files)} MSA images ({labeled} labels)", {
+            "count": len(image_files), "labeled": labeled, "unlabeled": len(image_files) - labeled,
+        }
+
+
+def msa_box_iou(a: dict, b: dict) -> float:
+    ax1, ay1 = a["cx"] - a["w"] / 2, a["cy"] - a["h"] / 2
+    ax2, ay2 = a["cx"] + a["w"] / 2, a["cy"] + a["h"] / 2
+    bx1, by1 = b["cx"] - b["w"] / 2, b["cy"] - b["h"] / 2
+    bx2, by2 = b["cx"] + b["w"] / 2, b["cy"] + b["h"] / 2
+    overlap = max(0.0, min(ax2, bx2) - max(ax1, bx1)) * max(0.0, min(ay2, by2) - max(ay1, by1))
+    union = a["w"] * a["h"] + b["w"] * b["h"] - overlap
+    return overlap / union if union > 0 else 0.0
+
+
+def classify_msa_boxes(gt_rows: list, pred_rows: list) -> tuple[list[str], list[int]]:
+    candidates = sorted(
+        ((msa_box_iou(gt, pred), gi, pi) for gi, gt in enumerate(gt_rows)
+         for pi, pred in enumerate(pred_rows)), reverse=True
+    )
+    matched_gt, matched_pred = set(), set()
+    pred_statuses = ["extra"] * len(pred_rows)
+    missed_gt = set(range(len(gt_rows)))
+    for iou, gi, pi in candidates:
+        if iou < 0.5:
+            break
+        if gi in matched_gt or pi in matched_pred:
+            continue
+        matched_gt.add(gi)
+        matched_pred.add(pi)
+        if int(gt_rows[gi]["cls"]) == int(pred_rows[pi]["cls"]):
+            pred_statuses[pi] = "correct"
+            missed_gt.discard(gi)
+        else:
+            pred_statuses[pi] = "wrong_class"
+    return pred_statuses, sorted(missed_gt)
+
+
+def compare_msa_boxes(gt_rows: list, pred_rows: list, class_names: dict) -> list:
+    pred_statuses, missed_gt = classify_msa_boxes(gt_rows, pred_rows)
+    counts = {}
+
+    def add(class_id: int, field: str):
+        item = counts.setdefault(class_id, {"class_id": class_id,
+                                            "class_name": class_names.get(class_id, str(class_id)),
+                                            "missed": 0, "extra": 0})
+        item[field] += 1
+
+    for gi in missed_gt:
+        add(int(gt_rows[gi]["cls"]), "missed")
+    for pi, pred in enumerate(pred_rows):
+        if pred_statuses[pi] != "correct":
+            add(int(pred["cls"]), "extra")
+    return [counts[key] for key in sorted(counts)]
+
+
+def run_project_msa_test(project_name: str, run_folder: str, weight_name: str, progress_cb=None):
+    msa_root = msa_root_for_project(project_name)
+    run_dir, err = resolve_run_dir(project_name, run_folder)
+    if msa_root is None or err or not run_dir:
+        return False, "Project or model run not found", None
+    if weight_name not in {"best.pt", "last.pt"}:
+        return False, "Invalid model weight", None
+    weights_path = run_dir / "weights" / weight_name
+    if not weights_path.is_file():
+        return False, "Model weight not found", None
+    image_dir = msa_root / "images"
+    label_dir = msa_root / "labels"
+    pairs = []
+    if image_dir.is_dir() and label_dir.is_dir():
+        all_images = [image for image in sorted(image_dir.iterdir())
+                      if image.is_file() and image.suffix.lower() in IMAGE_EXTS]
+        missing_labels = [image.name for image in all_images
+                          if not (label_dir / f"{image.stem}.txt").is_file()]
+        if missing_labels:
+            return False, f"{len(missing_labels)} MSA images have no label; predict or edit them first", None
+        pairs = [(image.stem, image, label_dir / f"{image.stem}.txt") for image in all_images]
+    if not pairs:
+        return False, "No paired images and labels in project MSA folder", None
+
+    result_id = datetime.now().strftime("%Y%m%d_%H%M%S_%f") + "_" + uuid.uuid4().hex[:6]
+    result_dir = msa_root / "results" / result_id
+    result_dir.mkdir(parents=True, exist_ok=False)
+    try:
+        if progress_cb:
+            progress_cb(5, "Tải model", 0, len(pairs))
+        module = load_train_module()
+        model = module.YOLO(str(weights_path))
+        model_names = getattr(model, "names", None)
+        if isinstance(model_names, dict):
+            class_names = {int(k): str(v) for k, v in model_names.items() if str(k).isdigit()}
+        elif isinstance(model_names, (list, tuple)):
+            class_names = {i: str(v) for i, v in enumerate(model_names)}
+        else:
+            classes, _ = load_project_classes(msa_root.parent)
+            class_names = {i: name for i, name in enumerate(classes)}
+
+        args_info = _read_run_args(run_dir)
+        predictions = model.predict(
+            source=str(image_dir), imgsz=int(args_info.get("imgsz", 640) or 640),
+            device=args_info.get("device", 0), conf=0.25, iou=0.45,
+            save=True, save_txt=True, save_conf=True, project=str(result_dir),
+            name="prediction", exist_ok=True, stream=True,
+        )
+        for index, _ in enumerate(predictions, 1):
+            if progress_cb:
+                progress_cb(10 + round(70 * min(index, len(pairs)) / len(pairs)),
+                            "Dự đoán ảnh MSA", min(index, len(pairs)), len(pairs))
+        prediction_dir = result_dir / "prediction"
+        gt_vis_dir = result_dir / "gt"
+        gt_vis_dir.mkdir()
+        sample_items = []
+        class_errors = {}
+        wrong_images = 0
+        for index, (stem, image_path, label_path) in enumerate(pairs, 1):
+            gt_rows = _read_yolo_label_file(label_path)
+            pred_rows = _read_yolo_label_file(prediction_dir / "labels" / f"{stem}.txt")
+            issues = compare_msa_boxes(gt_rows, pred_rows, class_names)
+            for issue in issues:
+                class_id = issue["class_id"]
+                stat = class_errors.setdefault(str(class_id), {
+                    "class_name": issue["class_name"], "wrong_images": 0,
+                    "missed": 0, "extra": 0,
+                })
+                stat["wrong_images"] += 1
+                stat["missed"] += issue["missed"]
+                stat["extra"] += issue["extra"]
+            if issues:
+                wrong_images += 1
+            gt_file = gt_vis_dir / image_path.name
+            _draw_label_overlay(image_path, gt_rows, class_names, gt_file, getattr(module, "cv2", None))
+            pred_file = prediction_dir / image_path.name
+            sample_items.append({
+                "image_name": image_path.name, "status": "wrong" if issues else "correct",
+                "issues": issues, "gt_image": f"results/{result_id}/gt/{image_path.name}",
+                "pred_image": f"results/{result_id}/prediction/{image_path.name}" if pred_file.is_file() else f"images/{image_path.name}",
+                "gt_class_ids": sorted({int(row["cls"]) for row in gt_rows}),
+                "pred_class_ids": sorted({int(row["cls"]) for row in pred_rows}),
+            })
+            if progress_cb:
+                progress_cb(80 + round(19 * index / len(pairs)), "Đối chiếu label", index, len(pairs))
+        total = len(pairs)
+        for stat in class_errors.values():
+            stat["percentage"] = round(stat["wrong_images"] * 100 / total, 2)
+        results = {
+            "id": result_id, "run_folder": run_folder, "weight": weight_name,
+            "created_at": now_str(), "total_images": total, "wrong_images": wrong_images,
+            "error_rate": round(wrong_images * 100 / total, 2),
+            "class_errors": class_errors, "sample_items": sample_items,
+            "class_names": class_names,
+        }
+        (result_dir / "results.json").write_text(json.dumps(results, ensure_ascii=False, indent=2), encoding="utf-8")
+        if progress_cb:
+            progress_cb(100, "Hoàn tất", len(pairs), len(pairs))
+        return True, "MSA test completed", results
+    except Exception as exc:
+        return False, f"MSA test failed: {exc}", None
+
+
+def predict_missing_msa_labels(project_name: str, run_folder: str, weight_name: str, progress_cb=None):
+    msa_root = msa_root_for_project(project_name)
+    run_dir, err = resolve_run_dir(project_name, run_folder)
+    if msa_root is None or err or not run_dir or weight_name not in {"best.pt", "last.pt"}:
+        return False, "Project or model not found", None
+    weights_path = run_dir / "weights" / weight_name
+    if not weights_path.is_file():
+        return False, "Model weight not found", None
+    image_dir = msa_root / "images"
+    label_dir = msa_root / "labels"
+    label_dir.mkdir(parents=True, exist_ok=True)
+    images = sorted((image for image in image_dir.iterdir()
+                     if image.is_file() and image.suffix.lower() in IMAGE_EXTS
+                     and not (label_dir / f"{image.stem}.txt").exists()), key=lambda image: image.name.lower()) if image_dir.is_dir() else []
+    if not images:
+        return False, "All MSA images already have labels", None
+    if progress_cb:
+        progress_cb(5, "Tải model", 0, len(images))
+    try:
+        module = load_train_module()
+        model = module.YOLO(str(weights_path))
+        args_info = _read_run_args(run_dir)
+        generated = 0
+        processed = set()
+        with tempfile.TemporaryDirectory(prefix="msa_label_predict_", dir=str(msa_root)) as tmp_name:
+            source_dir = Path(tmp_name) / "images"
+            source_dir.mkdir()
+            for image in images:
+                staged_image = source_dir / image.name
+                try:
+                    os.link(image, staged_image)
+                except OSError:
+                    shutil.copy2(image, staged_image)
+            predictions = model.predict(
+                source=str(source_dir),
+                imgsz=int(args_info.get("imgsz", 640) or 640),
+                device=args_info.get("device", 0), conf=0.25, iou=0.45,
+                save=False, stream=True, verbose=False,
+            )
+            expected = {image.name for image in images}
+            for index, result in enumerate(predictions, 1):
+                image_name = Path(str(result.path)).name
+                if image_name not in expected or image_name in processed:
+                    return False, f"Unexpected prediction image: {image_name}", None
+                processed.add(image_name)
+                label_path = label_dir / f"{Path(image_name).stem}.txt"
+                temp_label = Path(tmp_name) / f"{Path(image_name).stem}.txt"
+                result.save_txt(str(temp_label), save_conf=False)
+                text = temp_label.read_text(encoding="utf-8") if temp_label.is_file() else ""
+                try:
+                    with label_path.open("x", encoding="utf-8") as dest:
+                        dest.write(text)
+                    generated += 1
+                except FileExistsError:
+                    pass
+                if progress_cb:
+                    progress_cb(10 + round(90 * min(index, len(images)) / len(images)),
+                                "Predict label gốc", min(index, len(images)), len(images))
+        if len(processed) != len(images):
+            return False, f"Model returned {len(processed)}/{len(images)} images", None
+        return True, f"Created {generated} MSA labels; kept {len(images) - generated} existing labels", {
+            "generated": generated, "total": len(images),
+        }
+    except Exception as exc:
+        return False, f"MSA label prediction failed: {exc}", None
+
+
+MSA_TASK = {"status": "idle", "project": "", "message": "", "result_id": "", "progress": 0, "processed": 0, "total": 0}
+MSA_UPLOAD_TASK = {"status": "idle", "project": "", "message": "", "progress": 0, "processed": 0, "total": 0}
+MSA_LABEL_TASK = {"status": "idle", "project": "", "message": "", "progress": 0, "processed": 0, "total": 0}
+msa_task_lock = threading.Lock()
+
+
+def msa_audit_actor():
+    return {"user": current_auth_user(), "session_id": current_session_id(),
+            "ip": str(request.headers.get("X-Forwarded-For") or request.remote_addr or "").strip()}
+
+
+def write_msa_task_audit(action: str, status: str, project: str, target: str, details: str, actor: dict):
+    try:
+        append_audit_log({"time": now_str(), **actor, "action": action, "status": status,
+                          "project": project, "target": target, "details": details})
+    except Exception:
+        pass
+
+
+def run_project_msa_test_task(project_name: str, run_folder: str, weight_name: str, actor: dict):
+    def update_progress(percent, message, processed, total):
+        with msa_task_lock:
+            MSA_TASK.update(progress=percent, message=message, processed=processed, total=total)
+
+    try:
+        ok, message, results = run_project_msa_test(project_name, run_folder, weight_name, progress_cb=update_progress)
+    except Exception as exc:
+        ok, message, results = False, f"MSA test failed: {exc}", None
+    write_msa_task_audit("project_model_testing_msa", "success" if ok else "failed",
+                         project_name, run_folder, message, actor)
+    with msa_task_lock:
+        MSA_TASK.update(status="success" if ok else "failed", message=message,
+                        progress=100 if ok else MSA_TASK["progress"],
+                        result_id=results["id"] if results else "")
+
+
+def import_msa_zip_task(project_name: str, zip_path: Path, temp_dir, actor: dict):
+    def update_progress(percent, message, processed, total):
+        with msa_task_lock:
+            MSA_UPLOAD_TASK.update(progress=percent, message=message, processed=processed, total=total)
+
+    try:
+        ok, message, payload = import_msa_zip(project_name, zip_path, progress_cb=update_progress)
+    except Exception as exc:
+        ok, message, payload = False, f"MSA import failed: {exc}", None
+    finally:
+        temp_dir.cleanup()
+    write_msa_task_audit("project_msa_import", "success" if ok else "failed",
+                         project_name, zip_path.name, message, actor)
+    with msa_task_lock:
+        MSA_UPLOAD_TASK.update(status="success" if ok else "failed", message=message,
+                               progress=100 if ok else MSA_UPLOAD_TASK["progress"],
+                               count=(payload or {}).get("count", 0))
+
+
+def predict_missing_msa_labels_task(project_name: str, run_folder: str, weight_name: str, actor: dict):
+    def update_progress(percent, message, processed, total):
+        with msa_task_lock:
+            MSA_LABEL_TASK.update(progress=percent, message=message, processed=processed, total=total)
+
+    try:
+        ok, message, payload = predict_missing_msa_labels(
+            project_name, run_folder, weight_name, progress_cb=update_progress
+        )
+    except Exception as exc:
+        ok, message, payload = False, f"MSA label prediction failed: {exc}", None
+    write_msa_task_audit("project_msa_predict_labels", "success" if ok else "failed",
+                         project_name, f"{run_folder}/{weight_name}", message, actor)
+    with msa_task_lock:
+        MSA_LABEL_TASK.update(status="success" if ok else "failed", message=message,
+                              progress=100 if ok else MSA_LABEL_TASK["progress"],
+                              generated=(payload or {}).get("generated", 0))
+
+
 def build_msa_testing_summary(project_path: Path, run_dir: Path):
     msa_dir = (run_dir / "ModelTesting_MSA").resolve()
     if not msa_dir.exists() or not msa_dir.is_dir() or not is_path_inside(msa_dir, run_dir):
@@ -3029,10 +4066,6 @@ def run_msa_model_testing(project_name: str, run_folder: str, upload_file):
     project_path = resolve_project_path(project_name)
     if not project_path or not project_path.exists():
         return False, "Project not found", None
-
-    data_yaml = find_project_data_yaml(project_path)
-    if data_yaml is None:
-        return False, "Missing data.yaml in project", None
 
     best_path = run_dir / "weights" / "best.pt"
     last_path = run_dir / "weights" / "last.pt"
@@ -3089,6 +4122,16 @@ def run_msa_model_testing(project_name: str, run_folder: str, upload_file):
         args_info = _read_run_args(run_dir)
         module = load_train_module()
         model = module.YOLO(str(weights_path))
+        model_names = getattr(model, "names", None)
+        if isinstance(model_names, dict):
+            class_names = {int(k): str(v) for k, v in model_names.items() if str(k).isdigit()}
+        elif isinstance(model_names, (list, tuple)):
+            class_names = {i: str(v) for i, v in enumerate(model_names)}
+        else:
+            class_names = {}
+        if not class_names:
+            project_classes, _ = load_project_classes(project_path)
+            class_names = {i: name for i, name in enumerate(project_classes)}
 
         image_source_dir = tmp_dir / "msa_images"
         image_source_dir.mkdir(parents=True, exist_ok=True)
@@ -3115,8 +4158,8 @@ def run_msa_model_testing(project_name: str, run_folder: str, upload_file):
             return False, f"MSA prediction failed: {e}", None
 
         # determine predicted labels and images
-        predicted_labels_dir = output_predict / "msa_predict" / "labels"
-        predicted_images_dir = output_predict / "msa_predict"
+        predicted_labels_dir = output_predict / "labels"
+        predicted_images_dir = output_predict
         sample_items = []
         total_images = 0
         wrong_images = 0
@@ -3125,7 +4168,7 @@ def run_msa_model_testing(project_name: str, run_folder: str, upload_file):
             gt_rows = _read_yolo_label_file(label_path)
             gt_ids = sorted({int(row["cls"]) for row in gt_rows})
             gt_vis_path = gt_vis_dir / f"{stem}.jpg"
-            _draw_label_overlay(img_path, gt_rows, _load_class_names(data_yaml), gt_vis_path, getattr(module, "cv2", None))
+            _draw_label_overlay(img_path, gt_rows, class_names, gt_vis_path, getattr(module, "cv2", None))
 
             pred_label_file = predicted_labels_dir / f"{stem}.txt"
             pred_rows = _read_yolo_label_file(pred_label_file)
@@ -3235,6 +4278,248 @@ def start_model_test_task(project_name: str, run_folder: str):
     )
     thread.start()
     return True, "Model testing started", {
+        "task_id": task_id,
+        "status": "running",
+    }
+
+
+def _parse_predict_options(raw: dict):
+    raw = raw or {}
+
+    def as_float(name: str, default: float, min_value: float, max_value: float):
+        try:
+            value = float(raw.get(name, default))
+        except Exception:
+            value = default
+        return max(min_value, min(max_value, value))
+
+    def as_int(name: str, default: int, min_value: int, max_value: int):
+        try:
+            value = int(float(raw.get(name, default)))
+        except Exception:
+            value = default
+        return max(min_value, min(max_value, value))
+
+    device = str(raw.get("device", "") if raw.get("device", "") is not None else "").strip()
+    return {
+        "conf": as_float("conf", 0.5, 0.0, 1.0),
+        "iou": as_float("iou", 0.65, 0.0, 1.0),
+        "imgsz": as_int("imgsz", 640, 32, 4096),
+        "max_det": as_int("max_det", 300, 1, 10000),
+        "device": device,
+        "save_conf": bool(raw.get("save_conf", False)),
+        "include_empty_labels": bool(raw.get("include_empty_labels", False)),
+        "save_empty_labels": bool(raw.get("save_empty_labels", True)),
+    }
+
+
+def find_unlabeled_project_images(project_name: str, include_empty_labels: bool = False):
+    project_path = resolve_project_path(project_name)
+    if not project_path or not project_path.exists():
+        return None, [], "project_not_found"
+
+    image_dir, all_images = list_project_images(project_path, limit=0)
+    if not image_dir:
+        return None, [], "image_dir_not_found"
+
+    rows = []
+    for rel in all_images:
+        label_file, err = resolve_label_file_for_image(project_name, rel, create_missing=False)
+        if err:
+            continue
+        has_label = bool(label_file and label_file.exists() and label_file.is_file())
+        if has_label and include_empty_labels:
+            try:
+                has_label = bool(label_file.read_text(encoding="utf-8").strip())
+            except Exception:
+                has_label = True
+        if has_label:
+            continue
+        img_file = (image_dir / rel).resolve()
+        if is_path_inside(img_file, image_dir) and img_file.exists() and img_file.is_file():
+            rows.append({
+                "rel": rel,
+                "image_file": img_file,
+                "label_file": (image_dir / Path(rel).with_suffix(".txt")).resolve(),
+            })
+
+    return image_dir, rows, None
+
+
+def run_predict_unlabeled(project_name: str, weights_rel: str, options: dict):
+    weights_path, err = resolve_output_weight_file(project_name, weights_rel)
+    if err or not weights_path:
+        return False, f"Model weight not found: {err or 'file_not_found'}", None
+
+    opts = _parse_predict_options(options)
+    image_dir, rows, err = find_unlabeled_project_images(
+        project_name,
+        include_empty_labels=bool(opts.get("include_empty_labels")),
+    )
+    if err or not image_dir:
+        return False, f"Cannot find project images: {err or 'image_dir_not_found'}", None
+    if not rows:
+        return True, "No images need prediction", {
+            "project": project_name,
+            "weights_rel": weights_rel,
+            "total": 0,
+            "written": 0,
+            "empty_written": 0,
+            "skipped": 0,
+        }
+
+    try:
+        from ultralytics import YOLO
+    except Exception as e:
+        return False, f"Cannot import ultralytics YOLO: {e}", None
+
+    with predict_task_lock:
+        if PREDICT_TASK.get("status") == "running":
+            _set_predict_task_locked(
+                progress=8.0,
+                message="Loading model",
+                detail=f"{project_name} | {Path(weights_rel).name}",
+            )
+
+    append_log(project_name, f"[{now_str()}] PREDICT START: {weights_rel} ({len(rows)} image(s))")
+    try:
+        model = YOLO(str(weights_path))
+    except Exception as e:
+        append_log(project_name, f"[{now_str()}] PREDICT FAILED: cannot load model: {e}")
+        return False, f"Cannot load model: {e}", None
+
+    written = 0
+    empty_written = 0
+    skipped = 0
+    errors = []
+    total = len(rows)
+    device = opts.get("device")
+    predict_kwargs = {
+        "conf": float(opts.get("conf", 0.5)),
+        "iou": float(opts.get("iou", 0.65)),
+        "imgsz": int(opts.get("imgsz", 640)),
+        "max_det": int(opts.get("max_det", 300)),
+        "verbose": False,
+    }
+    if device:
+        predict_kwargs["device"] = device
+
+    for idx, row in enumerate(rows, start=1):
+        rel = str(row.get("rel") or "")
+        img_file = row.get("image_file")
+        label_file = row.get("label_file")
+        pct = 10.0 + ((idx - 1) / max(1, total)) * 84.0
+        with predict_task_lock:
+            if PREDICT_TASK.get("status") == "running":
+                _set_predict_task_locked(
+                    progress=pct,
+                    message=f"Predicting {idx}/{total}",
+                    detail=rel,
+                )
+        try:
+            if not label_file or not is_path_inside(label_file, image_dir):
+                skipped += 1
+                continue
+            if label_file.exists() and label_file.is_file() and not opts.get("include_empty_labels"):
+                skipped += 1
+                continue
+            results = model.predict(source=str(img_file), **predict_kwargs)
+            result = results[0] if results else None
+            lines = []
+            boxes = getattr(result, "boxes", None) if result is not None else None
+            if boxes is not None and len(boxes) > 0:
+                cls_values = boxes.cls.detach().cpu().numpy().tolist()
+                xywhn_values = boxes.xywhn.detach().cpu().numpy().tolist()
+                conf_values = boxes.conf.detach().cpu().numpy().tolist()
+                for cls_id, xywhn, conf_value in zip(cls_values, xywhn_values, conf_values):
+                    values = [int(cls_id), *[float(x) for x in xywhn]]
+                    if opts.get("save_conf"):
+                        values.append(float(conf_value))
+                    lines.append(" ".join([str(values[0])] + [f"{v:.6f}" for v in values[1:]]))
+            if lines or opts.get("save_empty_labels"):
+                label_file.parent.mkdir(parents=True, exist_ok=True)
+                label_file.write_text(("\n".join(lines) + ("\n" if lines else "")), encoding="utf-8")
+                written += 1
+                if not lines:
+                    empty_written += 1
+            else:
+                skipped += 1
+        except Exception as e:
+            skipped += 1
+            if len(errors) < 10:
+                errors.append(f"{rel}: {e}")
+
+    append_log(project_name, f"[{now_str()}] PREDICT DONE: written={written}, empty={empty_written}, skipped={skipped}")
+    return True, f"Predict completed: {written}/{total} label file(s) written", {
+        "project": project_name,
+        "weights_rel": weights_rel,
+        "total": total,
+        "written": written,
+        "empty_written": empty_written,
+        "skipped": skipped,
+        "errors": errors,
+        "options": opts,
+    }
+
+
+def _run_predict_task(task_id: str, project_name: str, weights_rel: str, options: dict):
+    with predict_task_lock:
+        _set_predict_task_locked(
+            progress=5.0,
+            message="Preparing prediction",
+            detail=f"{project_name} | {Path(weights_rel).name}",
+        )
+
+    ok, message, payload = run_predict_unlabeled(project_name, weights_rel, options)
+
+    with predict_task_lock:
+        if PREDICT_TASK.get("id") != task_id:
+            return
+        _set_predict_task_locked(
+            status="success" if ok else "failed",
+            progress=100.0 if ok else max(1.0, float(PREDICT_TASK.get("progress") or 0.0)),
+            message=message,
+            detail=f"{project_name} | {Path(weights_rel).name}",
+            ended_at=time.time(),
+            result=payload if ok else None,
+        )
+
+
+def start_predict_task(project_name: str, weights_rel: str, options: dict):
+    with predict_task_lock:
+        if PREDICT_TASK.get("status") == "running":
+            same_task = (
+                str(PREDICT_TASK.get("project") or "") == str(project_name or "")
+                and str(PREDICT_TASK.get("weights_rel") or "") == str(weights_rel or "")
+            )
+            if same_task:
+                return True, "Prediction is already running", {
+                    "task_id": PREDICT_TASK.get("id"),
+                    "status": PREDICT_TASK.get("status"),
+                }
+            return False, "Another prediction task is already running", None
+
+        task_id = f"predict-{int(time.time() * 1000)}"
+        _set_predict_task_locked(
+            id=task_id,
+            project=project_name,
+            weights_rel=weights_rel,
+            status="running",
+            progress=2.0,
+            message="Starting prediction",
+            detail=f"{project_name} | {Path(weights_rel).name}",
+            started_at=time.time(),
+            ended_at=0.0,
+            result=None,
+        )
+
+    thread = threading.Thread(
+        target=_run_predict_task,
+        args=(task_id, project_name, weights_rel, options or {}),
+        daemon=True,
+    )
+    thread.start()
+    return True, "Prediction started", {
         "task_id": task_id,
         "status": "running",
     }
@@ -3487,6 +4772,97 @@ def clear_dataset_for_project(project_name: str, progress_cb=None):
     return True, f"Đã xóa: {', '.join(removed)}", {"removed": removed}
 
 
+def clear_split_dataset_for_project(project_name: str):
+    project_path = resolve_project_path(project_name)
+    if not project_path or not project_path.exists():
+        return False, "Không tìm thấy project", {"removed": []}
+    if not is_path_inside(project_path, ROOT_DIR):
+        return False, "Đường dẫn project không hợp lệ", {"removed": []}
+
+    with state_lock:
+        info = STATE["projects"].get(project_name)
+        if info and (info.get("status") == "running" or project_name in STATE["queue"] or STATE.get("current") == project_name):
+            return False, "Project đang chạy hoặc đang trong queue", {"removed": []}
+
+    removed = []
+    pending = []
+    errors = []
+    for folder_name in ("train", "test", "valid"):
+        target = (project_path / folder_name).resolve()
+        if not is_path_inside(target, project_path):
+            continue
+        if target.exists() and target.is_dir():
+            ok, pending_path, err = remove_tree_best_effort(target, project_path)
+            if ok:
+                removed.append(folder_name)
+                if pending_path:
+                    pending.append(f"{folder_name} -> {pending_path}")
+            elif err:
+                errors.append(f"{folder_name}: {err}")
+
+    for file_name in ("data.yaml", "data.yml"):
+        target = (project_path / file_name).resolve()
+        if not is_path_inside(target, project_path):
+            continue
+        if target.exists() and target.is_file():
+            try:
+                try:
+                    os.chmod(target, stat.S_IWRITE | stat.S_IREAD)
+                except Exception:
+                    pass
+                target.unlink()
+                removed.append(file_name)
+            except Exception as e:
+                errors.append(f"{file_name}: {e}")
+
+    if errors:
+        return False, "Không xóa được dataset: " + "; ".join(errors), {
+            "removed": removed,
+            "pending_cleanup": pending,
+        }
+
+    if not removed:
+        return True, "Không có dataset split để xóa", {"removed": []}
+    message = f"Đã xóa: {', '.join(removed)}"
+    if pending:
+        message += f" (còn pending cleanup: {len(pending)})"
+    return True, message, {"removed": removed, "pending_cleanup": pending}
+
+
+def clear_split_dataset_for_projects(project_names: list[str]):
+    cleaned = []
+    seen = set()
+    for item in project_names or []:
+        name = str(item or "").strip()
+        if not name or name in seen:
+            continue
+        seen.add(name)
+        cleaned.append(name)
+
+    results = []
+    ok_count = 0
+    failed_count = 0
+    for name in cleaned:
+        try:
+            ok, message, payload = clear_split_dataset_for_project(name)
+        except Exception as e:
+            ok, message, payload = False, f"Không xóa được dataset: {e}", {"removed": []}
+        if ok:
+            ok_count += 1
+            append_log(name, f"[{now_str()}] CLEAR SELECTED DATASET: {message}")
+        else:
+            failed_count += 1
+            append_log(name, f"[{now_str()}] CLEAR SELECTED DATASET FAILED: {message}")
+        results.append({
+            "project": name,
+            "ok": ok,
+            "message": message,
+            **(payload or {}),
+        })
+
+    return ok_count, failed_count, results
+
+
 def run_dataset_task(project_name: str, operation: str, payload: dict | None = None):
     payload = dict(payload or {})
     op = str(operation or "").strip().lower()
@@ -3623,12 +4999,18 @@ def infer_completed_project_status(project_path: Path) -> tuple[str, int]:
 def finalize_stale_running_projects_locked(monitor_is_training: bool, matched_project_name: str | None):
     changed = False
     matched_project_name = str(matched_project_name or "").strip()
+    active_project_name = str(CURRENT_TRAIN_CONTROL.get("project") or "").strip()
 
     if monitor_is_training:
         return changed
 
     for name, info in STATE["projects"].items():
         if str(info.get("status") or "").strip() != "running":
+            continue
+        # run_project or the recovered watcher owns the active project lifecycle.
+        # Finalizing it here races with wait_train_completion_from_monitor and can
+        # write success first, then have the worker overwrite it with a stale RC.
+        if active_project_name and name == active_project_name:
             continue
         if matched_project_name and name == matched_project_name:
             continue
@@ -3642,7 +5024,7 @@ def finalize_stale_running_projects_locked(monitor_is_training: bool, matched_pr
         except Exception:
             continue
 
-        if find_project_train_pids(project_path):
+        if find_project_train_pids(project_path, include_launcher=False):
             continue
 
         final_status, returncode = infer_completed_project_status(project_path)
@@ -3669,6 +5051,7 @@ def finalize_stale_running_projects_locked(monitor_is_training: bool, matched_pr
         if str(STATE.get("current") or "").strip() == name:
             STATE["current"] = None
 
+        sync_queue_session_file_locked()
         changed = True
 
     return changed
@@ -3718,7 +5101,7 @@ def sync_running_project_progress_from_data_locked(ok, data):
                 matched_project_name = name
                 break
 
-    if not matched_project_name:
+    if not matched_project_name and monitor_is_training:
         matched_project_name = STATE.get("current")
 
     if matched_project_name and matched_project_name in STATE["projects"] and monitor_is_training:
@@ -3736,7 +5119,8 @@ def sync_running_project_progress_from_data_locked(ok, data):
             p["last_start"] = now_str()
             changed = True
 
-    if finalize_stale_running_projects_locked(monitor_is_training, matched_project_name):
+    stale_matched_name = matched_project_name if monitor_is_training else ""
+    if finalize_stale_running_projects_locked(monitor_is_training, stale_matched_name):
         changed = True
 
     MONITOR_CACHE["matched_project_name"] = matched_project_name
@@ -3785,6 +5169,10 @@ def monitor_loop():
             if cache_changed or state_changed:
                 bump_state_version_locked()
 
+            should_start_worker = bool(STATE.get("queue")) and not bool(STATE.get("current"))
+
+        if should_start_worker:
+            start_worker_if_needed()
         time.sleep(1.0)
 
 
@@ -3803,7 +5191,7 @@ def start_monitor_if_needed():
 def wait_train_completion_from_monitor(project_name: str, project_path: Path, process=None, assume_started: bool = False):
     project_name_norm = str(project_name or "").strip().lower()
     project_path_norm = str(project_path.resolve()).strip().lower()
-    seen_training = False
+    seen_training = bool(assume_started)
     consecutive_monitor_errors = 0
     saw_failed_signal = False
     start_ts = time.time()
@@ -3827,12 +5215,24 @@ def wait_train_completion_from_monitor(project_name: str, project_path: Path, pr
                 is_match = True
 
             if is_match and monitor_is_training:
+                if not seen_training:
+                    # Ignore a failed message left behind by the previous run.
+                    saw_failed_signal = False
                 seen_training = True
 
-            if is_match and (monitor_msg.startswith("failed") or "error" in monitor_msg):
+            if seen_training and is_match and (monitor_msg.startswith("failed") or "error" in monitor_msg):
                 saw_failed_signal = True
 
-            if seen_training and is_match and not monitor_is_training:
+            if seen_training and is_match and not monitor_is_training and not find_project_train_pids(project_path, include_launcher=False):
+                if stop_requested:
+                    return -15
+                if monitor_msg.startswith("completed") or monitor_msg in {"complete", "done", "finished"}:
+                    return 0
+                if saw_failed_signal:
+                    return 1
+                return 0
+
+            if seen_training and not monitor_is_training and not find_project_train_pids(project_path, include_launcher=False):
                 if stop_requested:
                     return -15
                 if saw_failed_signal:
@@ -3849,10 +5249,17 @@ def wait_train_completion_from_monitor(project_name: str, project_path: Path, pr
                 except OSError:
                     port_closed = True
 
+                if port_closed and find_project_train_pids(project_path, include_launcher=False):
+                    time.sleep(1.0)
+                    continue
                 if port_closed and stop_requested:
                     return -15
                 if port_closed and (time.time() - start_ts) >= grace_seconds:
-                    return 1 if saw_failed_signal else 0
+                    return 1
+
+        if (time.time() - start_ts) >= grace_seconds and not seen_training:
+            if not find_project_train_pids(project_path, include_launcher=False):
+                return -15 if stop_requested else 1
 
         if process is not None:
             polled = process.poll()
@@ -3862,6 +5269,8 @@ def wait_train_completion_from_monitor(project_name: str, project_path: Path, pr
                 return int(polled)
 
         time.sleep(1.0)
+
+
 def run_project(project_name):
     launcher_cmd = None
 
@@ -4131,7 +5540,11 @@ def worker_loop():
 def start_worker_if_needed():
     global worker_thread
     with state_lock:
-        running = STATE["worker_running"]
+        running = bool(STATE["worker_running"])
+        if running and worker_thread is not None and not worker_thread.is_alive():
+            STATE["worker_running"] = False
+            running = False
+            bump_state_version_locked()
 
     if running:
         return
@@ -4165,6 +5578,7 @@ def require_auth():
         return None
 
     if is_authenticated():
+        maybe_log_user_request(path)
         return None
 
     if path.startswith("/api/"):
@@ -4173,11 +5587,46 @@ def require_auth():
     return redirect(url_for("login", next=get_next_url(default=path)))
 
 
+def maybe_log_user_request(path: str):
+    try:
+        method = str(request.method or "").upper()
+        path = str(path or request.path or "").strip()
+        if path.startswith("/UI/") or path in {"/healthz"}:
+            return
+        if method == "GET":
+            if path not in {"/", "/project_editor"}:
+                return
+        elif method not in {"POST", "PUT", "PATCH", "DELETE"}:
+            return
+        if path in {"/api/train_monitor/status", "/api/state", "/api/log", "/api/activity_log"}:
+            return
+        if path.endswith("/status"):
+            return
+        project = ""
+        target = path
+        details = method
+        if method == "GET":
+            project = str(request.args.get("project", "") or "").strip()
+        else:
+            data = request.get_json(silent=True) if request.is_json else None
+            if isinstance(data, dict):
+                project = str(data.get("project", "") or data.get("source_project", "") or "").strip()
+                target = str(data.get("rel", "") or data.get("target", "") or path).strip()
+            else:
+                project = str(request.form.get("project", "") or "").strip()
+        write_audit_log("request", "seen", project=project, target=target, details=details)
+        if method == "GET" and path == "/project_editor" and project:
+            write_audit_log("label_editor_open", "success", project=project, target=path, details="opened")
+    except Exception:
+        return
+
+
 register_basic_routes(
     app,
     get_next_url=get_next_url,
     is_authenticated=is_authenticated,
     load_user_credentials=load_user_credentials,
+    authenticate_user=authenticate_user,
     verify_password=verify_password,
     mark_authenticated=mark_authenticated,
     clear_auth=clear_auth,
@@ -4204,7 +5653,16 @@ def api_scan():
 @app.route("/api/upload_project", methods=["POST"])
 def api_upload_project():
     upload_file = request.files.get("file")
-    ok, status, project_name = save_uploaded_project_zip(upload_file)
+    filename = str(getattr(upload_file, "filename", "") or "").strip()
+    try:
+        ok, status, project_name = save_uploaded_project_zip(upload_file)
+    except Exception as e:
+        write_audit_log("upload_project", "failed", target=filename, details=str(e))
+        return jsonify({
+            "ok": False,
+            "status": "exception",
+            "message": f"Upload failed: {e}"
+        }), 500
 
     msg_map = {
         "missing_file": "Missing upload file",
@@ -4222,6 +5680,7 @@ def api_upload_project():
     }
 
     if not ok:
+        write_audit_log("upload_project", "failed", project=project_name or "", target=filename, details=status)
         return jsonify({
             "ok": False,
             "status": status,
@@ -4229,6 +5688,7 @@ def api_upload_project():
         }), 400
 
     projects = scan_projects()
+    write_audit_log("upload_project", "success", project=project_name or "", target=filename, details="uploaded")
     return jsonify({
         "ok": True,
         "status": "uploaded",
@@ -4241,7 +5701,43 @@ def api_upload_project():
 @app.route("/api/state")
 def api_state():
     with state_lock:
-        return jsonify(build_state_payload_locked())
+        payload = build_state_payload_locked()
+    return jsonify(payload)
+
+
+@app.route("/api/project/note", methods=["POST"])
+def api_project_note():
+    data = request.get_json(force=True) or {}
+    project = str(data.get("project", "") or "").strip()
+    note = str(data.get("note", "") or "")
+    note = note.replace("\r", " ").replace("\n", " ").strip()
+    if len(note) > 500:
+        note = note[:500]
+
+    if not project:
+        write_audit_log("project_note", "failed", details="Missing project name")
+        return jsonify({"ok": False, "message": "Missing project name"}), 400
+
+    with state_lock:
+        info = STATE["projects"].get(project)
+        if not info or not str(info.get("path") or "").strip():
+            write_audit_log("project_note", "failed", project=project, details="Project not found")
+            return jsonify({"ok": False, "message": "Project not found"}), 404
+
+    try:
+        update_project_note_file(project, note)
+    except Exception as e:
+        write_audit_log("project_note", "failed", project=project, details=str(e))
+        return jsonify({"ok": False, "message": f"Save note failed: {e}"}), 500
+
+    with state_lock:
+        info = STATE["projects"].get(project)
+        if info is not None:
+            info["note"] = note
+            bump_state_version_locked()
+
+    write_audit_log("project_note", "success", project=project, details="updated" if note else "cleared")
+    return jsonify({"ok": True, "project": project, "note": note, "message": "Saved"})
 
 
 @app.route("/api/snapshot")
@@ -4249,7 +5745,8 @@ def api_snapshot():
     log_project = request.args.get("log_project", "")
     log_tail = request.args.get("log_tail", str(API_LOG_TAIL_LINES))
     with state_lock:
-        return jsonify(build_snapshot_payload_locked(log_project, log_tail))
+        payload = build_snapshot_payload_locked(log_project, log_tail)
+    return jsonify(payload)
 
 
 @app.route("/api/state/changes")
@@ -4277,6 +5774,7 @@ def api_state_changes():
 
     changed = version > since
     with_snapshot = str(request.args.get("with_snapshot", "0")).strip().lower() in {"1", "true", "yes"}
+    with_state = str(request.args.get("with_state", "0")).strip().lower() in {"1", "true", "yes"}
     log_project = request.args.get("log_project", "")
     log_tail = request.args.get("log_tail", str(API_LOG_TAIL_LINES))
 
@@ -4287,7 +5785,11 @@ def api_state_changes():
     }
     if changed and with_snapshot:
         with state_lock:
-            payload["snapshot"] = build_snapshot_payload_locked(log_project, log_tail)
+            snapshot = build_snapshot_payload_locked(log_project, log_tail)
+        payload["snapshot"] = snapshot
+    elif changed and with_state:
+        with state_lock:
+            payload["state"] = build_state_payload_locked()
     return jsonify(payload)
 
 
@@ -4296,7 +5798,8 @@ def api_log():
     project = request.args.get("project", "")
     tail = request.args.get("tail", str(API_LOG_TAIL_LINES))
     with state_lock:
-        return jsonify(build_project_log_payload_locked(project, tail))
+        payload = build_project_log_payload_locked(project, tail)
+    return jsonify(payload)
 
 
 @app.route("/api/queue", methods=["POST"])
@@ -4347,6 +5850,20 @@ def api_queue_all():
     })
 
 
+@app.route("/api/queue/reorder", methods=["POST"])
+def api_queue_reorder():
+    data = request.get_json(force=True)
+    project = str(data.get("project", "") or "").strip()
+    direction = str(data.get("direction", "") or "").strip().lower()
+
+    if not project:
+        return jsonify({"ok": False, "message": "Missing project name"}), 400
+
+    ok, msg = reorder_queued_project(project, direction)
+    status = 200 if ok else 400
+    return jsonify({"ok": ok, "message": msg}), status
+
+
 @app.route("/api/queue_session/status")
 def api_queue_session_status():
     data = load_queue_session_file()
@@ -4379,6 +5896,7 @@ def api_queue_session_ignore():
 @app.route("/api/queue_session/continue", methods=["POST"])
 def api_queue_session_continue():
     data = load_queue_session_file()
+    saved_current = str(data.get("current") or "").strip()
     projects = []
     for name in list(data.get("projects") or []):
         text = str(name or "").strip()
@@ -4388,17 +5906,28 @@ def api_queue_session_continue():
     if not projects:
         return jsonify({"ok": False, "message": "No saved queue session"}), 404
 
+    restored_current = False
+    if saved_current and saved_current in projects:
+        with state_lock:
+            restored_current = restore_saved_current_project_locked(saved_current)
+        projects = [name for name in projects if name != saved_current]
+
     clear_queue_session_file()
     added, skipped = queue_projects(projects)
+    if restored_current:
+        with state_lock:
+            sync_queue_session_file_locked()
+        added = [saved_current] + added
     write_audit_log(
         "queue_session_continue",
         "success",
-        details=f"Continue last session: added={len(added)}, skipped={len(skipped)}",
+        details=f"Continue last session: restored_current={restored_current}, added={len(added)}, skipped={len(skipped)}",
     )
     return jsonify({
         "ok": True,
         "added": added,
         "skipped": skipped,
+        "restored_current": restored_current,
         "message": f"Continued last session: added {len(added)}, skipped {len(skipped)}",
     })
 
@@ -4451,6 +5980,135 @@ def api_lv2_verify():
     mark_lv2_authenticated()
     write_audit_log("lv2_verify", "success", details="LV2 verified")
     return jsonify({"ok": True, "message": "LV2 verified"})
+
+
+@app.route("/api/lv3/verify", methods=["POST"])
+def api_lv3_verify():
+    data = request.get_json(force=True) or {}
+    password = str(data.get("password", "") or "")
+    if password != LV3_PASSWORD:
+        write_audit_log("lv3_verify", "failed", details="Invalid LV3 password")
+        return jsonify({"ok": False, "message": "Sai mật khẩu LV3"}), 403
+    mark_lv3_authenticated()
+    write_audit_log("lv3_verify", "success", details="LV3 verified")
+    return jsonify({"ok": True, "message": "LV3 verified"})
+
+
+@app.route("/api/activity_log")
+def api_activity_log():
+    lv3 = require_lv3_json()
+    if lv3 is not None:
+        write_audit_log("activity_log", "denied", details="LV3 password required")
+        return lv3
+
+    try:
+        limit = max(1, min(int(request.args.get("limit", "500")), 5000))
+    except Exception:
+        limit = 500
+    session_only = str(request.args.get("session", "1") or "1").strip().lower() not in {"0", "false", "no"}
+    items = load_audit_log_items(limit, session_only=session_only)
+    return jsonify({
+        "ok": True,
+        "items": items,
+        "count": len(items),
+        "session_id": current_session_id(),
+        "session_only": session_only,
+    })
+
+
+@app.route("/api/accounts")
+def api_accounts():
+    lv3 = require_lv3_json()
+    if lv3 is not None:
+        write_audit_log("accounts_list", "denied", details="LV3 password required")
+        return lv3
+
+    accounts = load_user_accounts()
+    current_user = current_auth_user()
+    return jsonify({
+        "ok": True,
+        "current_user": current_user,
+        "items": [
+            {
+                "username": str(x.get("username", "") or ""),
+                "created_at": str(x.get("created_at", "") or ""),
+                "current": str(x.get("username", "") or "") == current_user,
+            }
+            for x in accounts
+        ],
+    })
+
+
+@app.route("/api/accounts", methods=["POST"])
+def api_accounts_create():
+    lv3 = require_lv3_json()
+    if lv3 is not None:
+        write_audit_log("account_create", "denied", details="LV3 password required")
+        return lv3
+
+    data = request.get_json(force=True) or {}
+    username = str(data.get("username", "") or "").strip()
+    password = str(data.get("password", "") or "")
+    ok, status, details = create_user_account(username, password)
+    msg_map = {
+        "created": "Đã tạo tài khoản",
+        "missing_username": "Thiếu tên tài khoản",
+        "invalid_username": "Tên tài khoản chỉ được dùng chữ, số, dấu ., _, @, -",
+        "password_too_short": "Mật khẩu phải có ít nhất 4 ký tự",
+        "user_exists": "Tài khoản đã tồn tại",
+    }
+    write_audit_log("account_create", "success" if ok else "failed", target=username, details=msg_map.get(status, status))
+    return jsonify({
+        "ok": ok,
+        "status": status,
+        "message": msg_map.get(status, status),
+        **(details or {}),
+    }), (200 if ok else 400)
+
+
+@app.route("/api/accounts/delete", methods=["POST"])
+def api_accounts_delete():
+    lv3 = require_lv3_json()
+    if lv3 is not None:
+        write_audit_log("account_delete", "denied", details="LV3 password required")
+        return lv3
+
+    data = request.get_json(force=True) or {}
+    username = str(data.get("username", "") or "").strip()
+    if username.lower() == current_auth_user().lower():
+        write_audit_log("account_delete", "failed", target=username, details="Cannot delete current user")
+        return jsonify({"ok": False, "message": "Không thể xóa tài khoản đang đăng nhập"}), 400
+
+    ok, status, details = delete_user_account(username)
+    msg_map = {
+        "deleted": "Đã xóa tài khoản",
+        "not_found": "Không tìm thấy tài khoản",
+        "last_user": "Không thể xóa tài khoản cuối cùng",
+    }
+    write_audit_log("account_delete", "success" if ok else "failed", target=username, details=msg_map.get(status, status))
+    return jsonify({
+        "ok": ok,
+        "status": status,
+        "message": msg_map.get(status, status),
+        **(details or {}),
+    }), (200 if ok else 400)
+
+
+@app.route("/api/server/restart", methods=["POST"])
+def api_server_restart():
+    lv3 = require_lv3_json()
+    if lv3 is not None:
+        write_audit_log("server_restart", "denied", details="LV3 password required")
+        return lv3
+
+    with state_lock:
+        sync_queue_session_file_locked()
+    write_audit_log("server_restart", "success", details="Restart requested from toolbar")
+    restart_current_server_soon(1.0)
+    return jsonify({
+        "ok": True,
+        "message": "Server is restarting. Reload the page in a few seconds.",
+    })
 
 
 @app.route("/api/history/clear", methods=["POST"])
@@ -4588,6 +6246,39 @@ def api_project_clear_dataset():
     }), (200 if ok else 400)
 
 
+@app.route("/api/projects/clear_selected_dataset", methods=["POST"])
+def api_projects_clear_selected_dataset():
+    lv2 = require_lv2_json()
+    if lv2 is not None:
+        write_audit_log("projects_clear_selected_dataset", "denied", details="LV2 password required")
+        return lv2
+
+    data = request.get_json(force=True) or {}
+    projects = data.get("projects", [])
+    if not isinstance(projects, list) or not projects:
+        write_audit_log("projects_clear_selected_dataset", "failed", details="No project selected")
+        return jsonify({"ok": False, "message": "No project selected"}), 400
+
+    ok_count, failed_count, results = clear_split_dataset_for_projects(projects)
+    message = f"Cleared dataset for {ok_count} project(s), failed {failed_count}"
+    if failed_count:
+        failed_names = [str(x.get("project") or "") for x in results if not x.get("ok")]
+        if failed_names:
+            message = f"{message}: {', '.join(failed_names[:10])}"
+    write_audit_log(
+        "projects_clear_selected_dataset",
+        "success" if failed_count == 0 else "partial",
+        details=message,
+    )
+    return jsonify({
+        "ok": failed_count == 0,
+        "message": message,
+        "cleared": ok_count,
+        "failed": failed_count,
+        "results": results,
+    }), (200 if failed_count == 0 else 207)
+
+
 @app.route("/api/project/import_data_zip", methods=["POST"])
 def api_project_import_data_zip():
     project = str(request.form.get("project", "") or "").strip()
@@ -4632,6 +6323,52 @@ def api_project_import_data_zip():
         "images_added": images_added,
         "labels_added": labels_added,
         "message": message,
+    })
+
+
+@app.route("/api/project/import_data_images", methods=["POST"])
+def api_project_import_data_images():
+    project = str(request.form.get("project", "") or "").strip()
+    upload_files = request.files.getlist("files")
+    if not project:
+        write_audit_log("project_import_data_images", "failed", details="Missing project name")
+        return jsonify({"ok": False, "message": "Thiếu tên project"}), 400
+
+    ok, status, details = import_project_data_images(project, upload_files)
+    msg_map = {
+        "project_not_found": "Không tìm thấy project",
+        "cannot_create_image_dir": "Không tạo được thư mục image",
+        "missing_file": "Thiếu file upload",
+        "invalid_upload_path": "Đường dẫn file upload không hợp lệ",
+        "no_image_found": "Không có file ảnh hợp lệ",
+        "copy_failed": "Không copy được file vào project",
+    }
+
+    if not ok:
+        write_audit_log("project_import_data_images", "failed", project=project, details=msg_map.get(status, status))
+        return jsonify({
+            "ok": False,
+            "status": status,
+            "message": msg_map.get(status, status),
+            **(details or {}),
+        }), 400
+
+    invalidate_project_bbox_analysis(project)
+    images_added = int((details or {}).get("images_added", 0) or 0)
+    skipped_files = int((details or {}).get("skipped_files", 0) or 0)
+    message = f"Đã thêm ảnh vào {project}: {images_added} ảnh"
+    if skipped_files:
+        message += f", bỏ qua {skipped_files} file không phải ảnh"
+    write_audit_log("project_import_data_images", "success", project=project, details=message)
+    return jsonify({
+        "ok": True,
+        "status": "imported",
+        "project": project,
+        "images_added": images_added,
+        "labels_added": 0,
+        "skipped_files": skipped_files,
+        "message": message,
+        "saved_names": (details or {}).get("saved_names", []),
     })
 
 
@@ -4797,9 +6534,306 @@ def api_project_model_testing_msa():
     })
 
 
+@app.route("/msa_testing")
+def msa_testing_page():
+    project = request.args.get("project", "").strip()
+    msa_root = msa_root_for_project(project)
+    if msa_root is None:
+        abort(404)
+    for folder in ("images", "labels", "results"):
+        (msa_root / folder).mkdir(parents=True, exist_ok=True)
+    return render_template("msa_testing.html", project_name=project)
+
+
+@app.route("/api/project/msa")
+def api_project_msa():
+    project = request.args.get("project", "").strip()
+    msa_root = msa_root_for_project(project)
+    if msa_root is None:
+        return jsonify({"ok": False, "message": "Project not found"}), 404
+    image_dir = msa_root / "images"
+    label_dir = msa_root / "labels"
+    samples = []
+    if image_dir.is_dir():
+        samples = [{"name": image.name, "has_label": (label_dir / f"{image.stem}.txt").is_file()}
+                   for image in sorted(image_dir.iterdir())
+                   if image.is_file() and image.suffix.lower() in IMAGE_EXTS]
+    results = []
+    results_dir = msa_root / "results"
+    if results_dir.is_dir():
+        for folder in sorted(results_dir.iterdir(), reverse=True):
+            file_path = folder / "results.json"
+            if folder.is_dir() and file_path.is_file():
+                try:
+                    data = json.loads(file_path.read_text(encoding="utf-8"))
+                    results.append({key: data.get(key) for key in (
+                        "id", "run_folder", "weight", "created_at", "total_images", "wrong_images", "error_rate")})
+                except (OSError, ValueError):
+                    continue
+    with msa_task_lock:
+        task = dict(MSA_TASK)
+        upload_task = dict(MSA_UPLOAD_TASK)
+        label_task = dict(MSA_LABEL_TASK)
+    return jsonify({"ok": True, "models": list_msa_models(project),
+                    "samples": samples, "results": results, "task": task,
+                    "upload_task": upload_task, "label_task": label_task})
+
+
+@app.route("/api/project/msa/upload", methods=["POST"])
+def api_project_msa_upload():
+    project = request.form.get("project", "").strip()
+    upload_file = request.files.get("file")
+    if not upload_file or not upload_file.filename:
+        return jsonify({"ok": False, "message": "Missing ZIP file"}), 400
+    if msa_root_for_project(project) is None:
+        return jsonify({"ok": False, "message": "Project not found"}), 404
+    with msa_task_lock:
+        if any(task["status"] == "running" for task in (MSA_UPLOAD_TASK, MSA_TASK, MSA_LABEL_TASK)):
+            return jsonify({"ok": False, "message": "Another MSA task is running"}), 409
+        MSA_UPLOAD_TASK.update(status="running", project=project, message="Đang nhận ZIP",
+                               progress=0, processed=0, total=0)
+    temp_dir = tempfile.TemporaryDirectory(prefix="msa_upload_")
+    zip_path = Path(temp_dir.name) / "upload.zip"
+    try:
+        upload_file.save(str(zip_path))
+    except Exception as exc:
+        temp_dir.cleanup()
+        with msa_task_lock:
+            MSA_UPLOAD_TASK.update(status="failed", message=f"Unable to save ZIP: {exc}")
+        return jsonify({"ok": False, "message": "Unable to save ZIP"}), 500
+    actor = msa_audit_actor()
+    threading.Thread(target=import_msa_zip_task, args=(project, zip_path, temp_dir, actor), daemon=True).start()
+    return jsonify({"ok": True, "message": "MSA import started"})
+
+
+@app.route("/api/project/msa/run", methods=["POST"])
+def api_project_msa_run():
+    data = request.get_json(silent=True) or {}
+    project = str(data.get("project") or "").strip()
+    run_folder = str(data.get("run_folder") or "").strip()
+    weight = str(data.get("weight") or "").strip()
+    msa_root = msa_root_for_project(project)
+    run_dir, err = resolve_run_dir(project, run_folder)
+    if msa_root is None or err or not run_dir or weight not in {"best.pt", "last.pt"} or not (run_dir / "weights" / weight).is_file():
+        return jsonify({"ok": False, "message": "Project or model not found"}), 400
+    with msa_task_lock:
+        if any(task["status"] == "running" for task in (MSA_UPLOAD_TASK, MSA_TASK, MSA_LABEL_TASK)):
+            return jsonify({"ok": False, "message": "Another MSA test is running"}), 409
+        MSA_TASK.update(status="running", project=project, message="Tải model",
+                        result_id="", progress=0, processed=0, total=0)
+    actor = msa_audit_actor()
+    threading.Thread(target=run_project_msa_test_task, args=(project, run_folder, weight, actor), daemon=True).start()
+    return jsonify({"ok": True, "message": "MSA test started"})
+
+
+@app.route("/api/project/msa/predict_labels", methods=["POST"])
+def api_project_msa_predict_labels():
+    data = request.get_json(silent=True) or {}
+    project = str(data.get("project") or "").strip()
+    run_folder = str(data.get("run_folder") or "").strip()
+    weight = str(data.get("weight") or "").strip()
+    msa_root = msa_root_for_project(project)
+    run_dir, err = resolve_run_dir(project, run_folder)
+    if msa_root is None or err or not run_dir or weight not in {"best.pt", "last.pt"} or not (run_dir / "weights" / weight).is_file():
+        return jsonify({"ok": False, "message": "Project or model not found"}), 400
+    with msa_task_lock:
+        if any(task["status"] == "running" for task in (MSA_UPLOAD_TASK, MSA_TASK, MSA_LABEL_TASK)):
+            return jsonify({"ok": False, "message": "Another MSA task is running"}), 409
+        MSA_LABEL_TASK.update(status="running", project=project, message="Tải model",
+                              progress=0, processed=0, total=0, generated=0)
+    actor = msa_audit_actor()
+    threading.Thread(target=predict_missing_msa_labels_task,
+                     args=(project, run_folder, weight, actor), daemon=True).start()
+    return jsonify({"ok": True, "message": "MSA label prediction started"})
+
+
+@app.route("/api/project/msa/status")
+def api_project_msa_status():
+    with msa_task_lock:
+        task = dict(MSA_TASK)
+        upload_task = dict(MSA_UPLOAD_TASK)
+        label_task = dict(MSA_LABEL_TASK)
+    return jsonify({"ok": True, "task": task, "upload_task": upload_task, "label_task": label_task})
+
+
+@app.route("/api/project/msa/result")
+def api_project_msa_result():
+    msa_root = msa_root_for_project(request.args.get("project", "").strip())
+    result_id = request.args.get("id", "").strip()
+    if msa_root is None or not re.fullmatch(r"[0-9]{8}_[0-9]{6}_[0-9]{6}_[0-9a-f]{6}", result_id):
+        abort(404)
+    result_file = msa_root / "results" / result_id / "results.json"
+    if not result_file.is_file():
+        abort(404)
+    return jsonify({"ok": True, "result": json.loads(result_file.read_text(encoding="utf-8"))})
+
+
+@app.route("/api/project/msa/sample")
+def api_project_msa_sample():
+    project = request.args.get("project", "").strip()
+    result_id = request.args.get("id", "").strip()
+    image_name = request.args.get("image", "").strip()
+    msa_root = msa_root_for_project(project)
+    if msa_root is None or not re.fullmatch(r"[0-9]{8}_[0-9]{6}_[0-9]{6}_[0-9a-f]{6}", result_id):
+        abort(404)
+    image_path, label_path = resolve_msa_image_and_label(project, image_name)
+    result_file = msa_root / "results" / result_id / "results.json"
+    if image_path is None or not result_file.is_file():
+        abort(404)
+    results = json.loads(result_file.read_text(encoding="utf-8"))
+    if not any(item.get("image_name") == image_name for item in results.get("sample_items", [])):
+        abort(404)
+    pred_label = result_file.parent / "prediction" / "labels" / f"{image_path.stem}.txt"
+    gt_rows = _read_yolo_label_file(label_path)
+    pred_rows = _read_yolo_label_file(pred_label)
+    pred_statuses, missed_gt = classify_msa_boxes(gt_rows, pred_rows)
+    class_names = results.get("class_names") or {}
+    if not class_names:
+        classes, _ = load_project_classes(msa_root.parent)
+        class_names = {str(i): name for i, name in enumerate(classes)}
+    return jsonify({"ok": True, "image_rel": f"images/{image_name}",
+                    "gt_boxes": gt_rows, "pred_boxes": pred_rows,
+                    "pred_statuses": pred_statuses, "missed_gt_indices": missed_gt,
+                    "class_names": class_names})
+
+
+@app.route("/api/project/msa/file")
+def api_project_msa_file():
+    msa_root = msa_root_for_project(request.args.get("project", "").strip())
+    rel = request.args.get("rel", "").strip()
+    if msa_root is None or not rel:
+        abort(404)
+    file_path = (msa_root / rel).resolve()
+    if not is_path_inside(file_path, msa_root) or file_path.suffix.lower() not in IMAGE_EXTS or not file_path.is_file():
+        abort(404)
+    return send_file(file_path)
+
+
+def resolve_msa_image_and_label(project: str, rel: str):
+    msa_root = msa_root_for_project(project)
+    if msa_root is None or not rel or Path(rel).name != rel:
+        return None, None
+    image_path = (msa_root / "images" / rel).resolve()
+    if not is_path_inside(image_path, msa_root / "images") or image_path.suffix.lower() not in IMAGE_EXTS or not image_path.is_file():
+        return None, None
+    label_path = msa_root / "labels" / f"{image_path.stem}.txt"
+    return image_path, label_path
+
+
+@app.route("/api/project/msa/images")
+def api_project_msa_images():
+    project = request.args.get("project", "").strip()
+    msa_root = msa_root_for_project(project)
+    if msa_root is None:
+        return jsonify({"ok": False, "message": "Project not found"}), 404
+    image_dir = msa_root / "images"
+    images = sorted((image for image in image_dir.iterdir() if image.is_file() and image.suffix.lower() in IMAGE_EXTS),
+                    key=lambda image: image.name.lower()) if image_dir.is_dir() else []
+    items = [{"rel": image.name, "name": image.name, "modified_at": datetime.fromtimestamp(image.stat().st_mtime).strftime("%Y-%m-%d %H:%M:%S"),
+              "bbox_count": len(_read_yolo_label_file(msa_root / "labels" / f"{image.stem}.txt")), "class_ids": []}
+             for image in images]
+    return jsonify({"ok": True, "images": [image.name for image in images], "items": items,
+                    "total": len(images), "page": 1, "total_pages": 1})
+
+
+@app.route("/api/project/msa/label", methods=["GET", "POST"])
+def api_project_msa_label():
+    data = request.get_json(silent=True) or {} if request.method == "POST" else request.args
+    project = str(data.get("project") or "").strip()
+    rel = str(data.get("rel") or "").strip()
+    image_path, label_path = resolve_msa_image_and_label(project, rel)
+    if image_path is None:
+        return jsonify({"ok": False, "message": "MSA image not found"}), 404
+    if request.method == "GET":
+        text = label_path.read_text(encoding="utf-8") if label_path.is_file() else ""
+        return jsonify({"ok": True, "text": text, "exists": label_path.is_file(),
+                        "bbox_count": len(_read_yolo_label_rows(text)), "bbox_anomaly_count": 0,
+                        "anomaly_box_indices": [], "anomaly_items": []})
+    text = str(data.get("text") or "").replace("\r\n", "\n")
+    try:
+        label_path.parent.mkdir(parents=True, exist_ok=True)
+        tmp_path = label_path.with_name(label_path.name + ".tmp")
+        tmp_path.write_text(text, encoding="utf-8")
+        os.replace(tmp_path, label_path)
+    except OSError as exc:
+        return jsonify({"ok": False, "message": f"Cannot save MSA label: {exc}"}), 500
+    write_audit_log("label_editor_msa_save_label", "success", project=project, target=rel,
+                    details=f"bbox={len(_read_yolo_label_rows(text))}")
+    return jsonify({"ok": True, "message": "MSA label saved"})
+
+
 @app.route("/api/project/model_testing/status")
 def api_project_model_testing_status():
     return jsonify(build_model_test_status_payload())
+
+
+@app.route("/api/project/predict_unlabeled", methods=["POST"])
+def api_project_predict_unlabeled():
+    data = request.get_json(force=True) or {}
+    project = str(data.get("project", "") or "").strip()
+    weights_rel = str(data.get("weights_rel", "") or "").strip().replace("\\", "/")
+    options = data.get("options") if isinstance(data.get("options"), dict) else {}
+    if not project or not weights_rel:
+        return jsonify({"ok": False, "message": "Missing project or weights_rel"}), 400
+
+    ok, message, payload = start_predict_task(project, weights_rel, options)
+    write_audit_log(
+        "project_predict_unlabeled",
+        "success" if ok else "failed",
+        project=project,
+        target=weights_rel,
+        details=message,
+    )
+    return jsonify({
+        "ok": ok,
+        "message": message,
+        **(payload or {}),
+    }), (200 if ok else 400)
+
+
+@app.route("/api/project/predict_unlabeled/quick", methods=["POST"])
+def api_project_predict_unlabeled_quick():
+    data = request.get_json(force=True) or {}
+    project = str(data.get("project", "") or "").strip()
+    options = data.get("options") if isinstance(data.get("options"), dict) else {}
+    if not project:
+        return jsonify({"ok": False, "message": "Missing project"}), 400
+
+    weights_rel, err = find_latest_best_weight_rel(project)
+    if err or not weights_rel:
+        return jsonify({"ok": False, "message": err or "No best.pt found"}), 404
+
+    quick_options = {
+        "conf": 0.5,
+        "iou": 0.65,
+        "imgsz": 640,
+        "device": "",
+        "max_det": 300,
+        "save_conf": False,
+        "include_empty_labels": False,
+        "save_empty_labels": False,
+    }
+    quick_options.update(options or {})
+
+    ok, message, payload = start_predict_task(project, weights_rel, quick_options)
+    write_audit_log(
+        "project_predict_unlabeled_quick",
+        "success" if ok else "failed",
+        project=project,
+        target=weights_rel,
+        details=message,
+    )
+    return jsonify({
+        "ok": ok,
+        "message": message,
+        "weights_rel": weights_rel,
+        **(payload or {}),
+    }), (200 if ok else 400)
+
+
+@app.route("/api/project/predict_unlabeled/status")
+def api_project_predict_unlabeled_status():
+    return jsonify(build_predict_status_payload())
 
 
 @app.route("/api/train_monitor/status")
@@ -4830,6 +6864,7 @@ def api_project_detail():
     train_images_count = count_images_in_dir(project_path / "train" / "images")
     valid_images_count = count_images_in_dir(project_path / "valid" / "images")
     test_images_count = count_images_in_dir(project_path / "test" / "images")
+    _, unlabeled_rows, _ = find_unlabeled_project_images(project, include_empty_labels=False)
     output_info = get_output_model_train_weights_info(project_path)
     run_details = get_output_model_train_runs_info(project_path)
     dataset_cfg = load_dataset_config(project_path)
@@ -4838,6 +6873,7 @@ def api_project_detail():
         "ok": True,
         "project": project,
         "image_folder_count": image_folder_count,
+        "unlabeled_image_count": len(unlabeled_rows or []),
         "train_images_count": train_images_count,
         "valid_images_count": valid_images_count,
         "test_images_count": test_images_count,
@@ -4855,6 +6891,7 @@ def api_project_detail():
 def api_project_images():
     project = request.args.get("project", "").strip()
     if not project:
+        write_audit_log("label_editor_list_images", "failed", details="Missing project")
         return jsonify({"ok": False, "message": "Thiếu tên project"}), 400
 
     try:
@@ -4876,13 +6913,17 @@ def api_project_images():
     anomaly_filter = str(request.args.get("anomaly_filter", "all") or "all").strip().lower()
     anomaly_sensitivity = str(request.args.get("anomaly_sensitivity", "medium") or "medium").strip().lower()
     target_rel = str(request.args.get("rel", "") or "").strip().replace("\\", "/")
-    class_filter = None
+    class_filter_ids = set()
     expected_boxes = None
     if class_filter_raw != "":
-        try:
-            class_filter = int(class_filter_raw)
-        except Exception:
-            class_filter = None
+        for part in class_filter_raw.replace(";", ",").split(","):
+            part = part.strip()
+            if not part:
+                continue
+            try:
+                class_filter_ids.add(int(part))
+            except Exception:
+                continue
     if expected_boxes_raw != "":
         try:
             expected_boxes = max(0, int(expected_boxes_raw))
@@ -4891,6 +6932,7 @@ def api_project_images():
 
     project_path = resolve_project_path(project)
     if not project_path or not project_path.exists():
+        write_audit_log("label_editor_list_images", "failed", project=project, details="Project not found")
         return jsonify({"ok": False, "message": "Không tìm thấy project"}), 404
 
     image_dir, all_images = list_project_images(project_path, limit=0)
@@ -4898,6 +6940,12 @@ def api_project_images():
     image_analysis_map = dict((bbox_analysis or {}).get("images") or {})
     group_stats = dict((bbox_analysis or {}).get("group_stats") or {})
     if not image_dir:
+        write_audit_log(
+            "label_editor_list_images",
+            "success",
+            project=project,
+            details="image_dir_missing count=0",
+        )
         return jsonify({
             "ok": True,
             "project": project,
@@ -4923,9 +6971,10 @@ def api_project_images():
         except Exception:
             modified_ts = 0.0
 
-        label_file, _ = resolve_label_file_for_image(project, rel, create_missing=False)
-        class_ids = extract_class_ids_from_label_file(label_file) if label_file else []
-        analysis_info = evaluate_bbox_image_anomalies(group_stats, dict(image_analysis_map.get(rel) or {}), anomaly_sensitivity)
+        image_analysis = dict(image_analysis_map.get(rel) or {})
+        label_rows = list(image_analysis.get("rows") or [])
+        class_ids = sorted(set(int(row.get("cls", -1)) for row in label_rows if int(row.get("cls", -1)) >= 0))
+        analysis_info = evaluate_bbox_image_anomalies(group_stats, image_analysis, anomaly_sensitivity)
         bbox_count = int(analysis_info.get("bbox_count", 0) or 0)
 
         items.append({
@@ -4943,8 +6992,8 @@ def api_project_images():
     if q:
         items = [x for x in items if q in str(x.get("name", "")).lower() or q in str(x.get("rel", "")).lower()]
 
-    if class_filter is not None:
-        items = [x for x in items if class_filter in (x.get("class_ids") or [])]
+    if class_filter_ids:
+        items = [x for x in items if class_filter_ids.intersection(set(x.get("class_ids") or []))]
 
     if expected_boxes is not None:
         if box_compare == "less":
@@ -4989,6 +7038,16 @@ def api_project_images():
     page_items = items[start:end]
     images = [x.get("rel") for x in page_items]
 
+    write_audit_log(
+        "label_editor_list_images",
+        "success",
+        project=project,
+        details=(
+            f"count={len(images)} total={total} page={page}/{total_pages} "
+            f"q={q or '-'} class={class_filter_raw or '-'} "
+            f"bbox={box_compare}:{expected_boxes_raw or '-'} anomaly={anomaly_filter}:{anomaly_sensitivity}"
+        ),
+    )
     return jsonify({
         "ok": True,
         "project": project,
@@ -5009,13 +7068,16 @@ def api_project_images():
 def api_project_classes():
     project = request.args.get("project", "").strip()
     if not project:
+        write_audit_log("label_editor_classes", "failed", details="Missing project")
         return jsonify({"ok": False, "message": "Thiếu tên project"}), 400
 
     project_path = resolve_project_path(project)
     if not project_path or not project_path.exists():
+        write_audit_log("label_editor_classes", "failed", project=project, details="Project not found")
         return jsonify({"ok": False, "message": "Không tìm thấy project"}), 404
 
     classes, class_file = load_project_classes(project_path)
+    write_audit_log("label_editor_classes", "success", project=project, details=f"count={len(classes)}")
     return jsonify({
         "ok": True,
         "project": project,
@@ -5030,12 +7092,15 @@ def api_project_image_file():
     project = request.args.get("project", "").strip()
     rel = request.args.get("rel", "").strip()
     if not project or not rel:
+        write_audit_log("label_editor_view_image", "failed", project=project, target=rel, details="Missing project or rel")
         abort(400)
 
     img_file, err = resolve_project_image_file(project, rel)
     if err or not img_file:
+        write_audit_log("label_editor_view_image", "failed", project=project, target=rel, details=err or "file_not_found")
         abort(404)
 
+    write_audit_log("label_editor_view_image", "success", project=project, target=rel, details=img_file.name)
     return send_file(img_file)
 
 
@@ -5058,16 +7123,69 @@ def api_project_image_info():
     project = request.args.get("project", "").strip()
     rel = request.args.get("rel", "").strip()
     if not project or not rel:
+        write_audit_log("label_editor_image_info", "failed", project=project, target=rel, details="Missing project or rel")
         return jsonify({"ok": False, "message": "Thiếu project hoặc rel"}), 400
 
     info, err = get_project_image_info(project, rel)
     if err or not info:
+        write_audit_log("label_editor_image_info", "failed", project=project, target=rel, details=err or "file_not_found")
         return jsonify({"ok": False, "message": err or "file_not_found"}), 404
 
+    write_audit_log(
+        "label_editor_image_info",
+        "success",
+        project=project,
+        target=rel,
+        details=f"width={info.get('width', '-')} height={info.get('height', '-')} size={info.get('size', '-')}",
+    )
     return jsonify({
         "ok": True,
         "project": project,
         **info
+    })
+
+
+@app.route("/api/project_image", methods=["DELETE", "POST"])
+def api_project_image_delete():
+    data = request.get_json(silent=True) or {}
+    project = str(data.get("project") or request.args.get("project", "") or "").strip()
+    rel = str(data.get("rel") or request.args.get("rel", "") or "").strip().replace("\\", "/")
+    if not project or not rel:
+        write_audit_log("label_editor_image_delete", "failed", project=project, target=rel, details="Missing project or rel")
+        return jsonify({"ok": False, "message": "Thiếu project hoặc rel"}), 400
+
+    img_file, err = resolve_project_image_file(project, rel)
+    if err or not img_file:
+        write_audit_log("label_editor_image_delete", "failed", project=project, target=rel, details=err or "file_not_found")
+        return jsonify({"ok": False, "message": err or "file_not_found"}), 404
+
+    label_file, _ = resolve_label_file_for_image(project, rel, create_missing=False)
+    removed_label = False
+    try:
+        if label_file and label_file.exists() and label_file.is_file():
+            label_file.unlink()
+            removed_label = True
+        img_file.unlink()
+    except Exception as e:
+        write_audit_log("project_image_delete", "failed", project=project, target=rel, details=str(e))
+        write_audit_log("label_editor_image_delete", "failed", project=project, target=rel, details=str(e))
+        return jsonify({"ok": False, "message": f"Không xóa được ảnh: {e}"}), 500
+
+    invalidate_project_bbox_analysis(project)
+    write_audit_log("project_image_delete", "success", project=project, target=rel, details="deleted")
+    write_audit_log(
+        "label_editor_image_delete",
+        "success",
+        project=project,
+        target=rel,
+        details=f"removed_label={removed_label}",
+    )
+    return jsonify({
+        "ok": True,
+        "project": project,
+        "rel": rel,
+        "removed_label": removed_label,
+        "message": "Đã xóa ảnh" + (" và label" if removed_label else ""),
     })
 
 
@@ -5077,10 +7195,12 @@ def api_project_label():
     rel = request.args.get("rel", "").strip()
     anomaly_sensitivity = str(request.args.get("anomaly_sensitivity", "medium") or "medium").strip().lower()
     if not project or not rel:
+        write_audit_log("label_editor_load_label", "failed", project=project, target=rel, details="Missing project or rel")
         return jsonify({"ok": False, "message": "Thiếu project hoặc rel"}), 400
 
     label_file, err = resolve_label_file_for_image(project, rel, create_missing=False)
     if err:
+        write_audit_log("label_editor_load_label", "failed", project=project, target=rel, details=err)
         return jsonify({"ok": False, "message": err}), 400
 
     text = ""
@@ -5096,6 +7216,16 @@ def api_project_label():
     group_stats = dict((bbox_analysis or {}).get("group_stats") or {})
     image_analysis = evaluate_bbox_image_anomalies(group_stats, image_rows_info, anomaly_sensitivity)
 
+    write_audit_log(
+        "label_editor_load_label",
+        "success",
+        project=project,
+        target=rel,
+        details=(
+            f"exists={exists} bbox={int(image_analysis.get('bbox_count', 0) or 0)} "
+            f"anomaly={int(image_analysis.get('anomaly_count', 0) or 0)} sensitivity={anomaly_sensitivity}"
+        ),
+    )
     return jsonify({
         "ok": True,
         "project": project,
@@ -5120,18 +7250,29 @@ def api_project_label_save():
     text = str(data.get("text", "") or "")
 
     if not project or not rel:
+        write_audit_log("label_editor_save_label", "failed", project=project, target=rel, details="Missing project or rel")
         return jsonify({"ok": False, "message": "Thiếu project hoặc rel"}), 400
 
     label_file, err = resolve_label_file_for_image(project, rel, create_missing=True)
     if err or not label_file:
+        write_audit_log("label_editor_save_label", "failed", project=project, target=rel, details=err or "cannot_resolve_label_path")
         return jsonify({"ok": False, "message": err or "cannot_resolve_label_path"}), 400
 
     try:
         label_file.write_text(text.replace("\r\n", "\n"), encoding="utf-8")
-    except Exception:
+    except Exception as e:
+        write_audit_log("label_editor_save_label", "failed", project=project, target=rel, details=str(e))
         return jsonify({"ok": False, "message": "Không lưu được label"}), 500
 
-    invalidate_project_bbox_analysis(project)
+    update_project_bbox_analysis_image(project, rel, text)
+    bbox_count = len(parse_yolo_label_rows(text))
+    write_audit_log(
+        "label_editor_save_label",
+        "success",
+        project=project,
+        target=rel,
+        details=f"bbox={bbox_count} chars={len(text)} label={label_file.name}",
+    )
 
     return jsonify({
         "ok": True,
@@ -5192,16 +7333,12 @@ def api_download_weight():
     if not project_path:
         abort(404)
 
-    output_dir = find_output_dir(project_path)
-    if not output_dir:
-        abort(404)
-
     try:
-        rel_parts = file_path.relative_to(output_dir).parts
+        rel_parts = file_path.relative_to(project_path).parts
     except Exception:
         abort(404)
 
-    run_folder = rel_parts[0] if len(rel_parts) >= 1 else "Model_Train"
+    run_folder = rel_parts[-3] if len(rel_parts) >= 3 and rel_parts[-2].lower() == "weights" else file_path.parent.name
     original_name = file_path.name
     zip_name = f"{safe_download_part(project)}__{safe_download_part(run_folder)}__{safe_download_part(original_name)}.zip"
 
@@ -5308,6 +7445,102 @@ def api_download_success_outputs():
     )
 
 
+@app.route("/api/download_selected_outputs")
+def api_download_selected_outputs():
+    raw_projects = request.args.getlist("project")
+    if len(raw_projects) == 1 and "," in raw_projects[0]:
+        raw_projects = raw_projects[0].split(",")
+
+    projects = []
+    for item in raw_projects:
+        name = str(item or "").strip()
+        if name and name not in projects:
+            projects.append(name)
+
+    if not projects:
+        return jsonify({"ok": False, "message": "Chưa chọn project nào"}), 400
+
+    selected = []
+    skipped = []
+    for project in projects:
+        weights_rel, err = find_latest_best_weight_rel(project)
+        if err or not weights_rel:
+            skipped.append({"project": project, "reason": err or "No best.pt found"})
+            continue
+        file_path, resolve_err = resolve_output_weight_file(project, weights_rel)
+        if resolve_err or not file_path:
+            skipped.append({"project": project, "reason": resolve_err or "File not found"})
+            continue
+        selected.append({
+            "project": project,
+            "weights_rel": weights_rel,
+            "file_path": file_path,
+        })
+
+    if not selected:
+        return jsonify({
+            "ok": False,
+            "message": "Không tìm thấy best.pt mới nhất trong các project đã chọn",
+            "skipped": skipped,
+        }), 404
+
+    tmp_dir = tempfile.mkdtemp(prefix="traincontrol_selected_best_")
+    zip_name = f"selected_best_weights_{datetime.now().strftime('%Y%m%d_%H%M%S')}.zip"
+    zip_path = Path(tmp_dir) / zip_name
+    manifest = []
+
+    with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+        for item in selected:
+            project = str(item["project"])
+            weights_rel = str(item["weights_rel"])
+            file_path = Path(item["file_path"])
+            rel_parts = Path(weights_rel).parts
+            run_folder = rel_parts[-3] if len(rel_parts) >= 3 and rel_parts[-2].lower() == "weights" else file_path.parent.name
+            arcname = f"{safe_download_part(project)}/{safe_download_part(run_folder)}/best.pt"
+            write_file_to_zip_preserve_times(zf, file_path, arcname)
+            try:
+                st = file_path.stat()
+                manifest.append({
+                    "project": project,
+                    "weights_rel": weights_rel,
+                    "path": arcname,
+                    "modified_at": datetime.fromtimestamp(st.st_mtime).strftime("%Y-%m-%d %H:%M:%S"),
+                    "modified_ts": st.st_mtime,
+                    "size": st.st_size,
+                })
+            except Exception:
+                pass
+
+        zf.writestr(
+            "traincontrol_selected_best_manifest.json",
+            json.dumps({
+                "items": manifest,
+                "skipped": skipped,
+            }, ensure_ascii=False, indent=2),
+        )
+
+    write_audit_log(
+        "download_selected_outputs",
+        "success",
+        details=f"selected={len(selected)}, skipped={len(skipped)}",
+    )
+
+    @after_this_request
+    def cleanup_selected_outputs(response):
+        try:
+            shutil.rmtree(tmp_dir, ignore_errors=True)
+        except Exception:
+            pass
+        return response
+
+    return send_file(
+        zip_path,
+        as_attachment=True,
+        download_name=zip_name,
+        last_modified=zip_path.stat().st_mtime
+    )
+
+
 @app.route("/api/notify/state")
 def api_notify_state():
     with state_lock:
@@ -5339,8 +7572,161 @@ def api_notify_toggle():
 initialize_app_runtime()
 
 
+def build_https_ssl_context():
+    if bool(HTTPS_CERT_FILE) != bool(HTTPS_KEY_FILE):
+        print("HTTPS configuration needs both TRAIN_CONTROL_HTTPS_CERT and TRAIN_CONTROL_HTTPS_KEY.")
+        raise SystemExit(1)
+
+    if HTTPS_CERT_FILE and HTTPS_KEY_FILE:
+        cert_path = Path(HTTPS_CERT_FILE)
+        key_path = Path(HTTPS_KEY_FILE)
+        if cert_path.exists() and key_path.exists():
+            return (str(cert_path), str(key_path))
+        print("HTTPS cert/key not found:")
+        print(f"  TRAIN_CONTROL_HTTPS_CERT={HTTPS_CERT_FILE}")
+        print(f"  TRAIN_CONTROL_HTTPS_KEY={HTTPS_KEY_FILE}")
+        raise SystemExit(1)
+
+    if importlib.util.find_spec("cryptography") is None:
+        print("HTTPS startup needs a certificate.")
+        print("No TRAIN_CONTROL_HTTPS_CERT/TRAIN_CONTROL_HTTPS_KEY was provided,")
+        print("and Flask adhoc certificates require the cryptography library.")
+        print("")
+        print("Fix option 1 - install dependency:")
+        print("  python -m pip install cryptography")
+        print("")
+        print("Fix option 2 - provide an existing PEM cert/key:")
+        print("  set TRAIN_CONTROL_HTTPS_CERT=D:\\path\\to\\cert.pem")
+        print("  set TRAIN_CONTROL_HTTPS_KEY=D:\\path\\to\\key.pem")
+        print("  python TrainControl.py")
+        raise SystemExit(1)
+
+    cert_dir = BASE_DIR / "certs"
+    cert_path = cert_dir / "traincontrol-cert.pem"
+    key_path = cert_dir / "traincontrol-key.pem"
+    ca_cert_path = cert_dir / "traincontrol-ca.pem"
+    ca_key_path = cert_dir / "traincontrol-ca-key.pem"
+    ca_install_path = cert_dir / "traincontrol-ca.cer"
+    if all(path.exists() for path in (cert_path, key_path, ca_cert_path, ca_key_path, ca_install_path)):
+        return (str(cert_path), str(key_path))
+
+    from cryptography import x509
+    from cryptography.hazmat.primitives import hashes, serialization
+    from cryptography.hazmat.primitives.asymmetric import rsa
+    from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
+    import ipaddress
+
+    cert_dir.mkdir(parents=True, exist_ok=True)
+    ca_key = rsa.generate_private_key(public_exponent=65537, key_size=3072)
+    key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    common_name = HTTPS_HOSTNAMES[0] if HTTPS_HOSTNAMES else "localhost"
+    ca_subject = x509.Name([
+        x509.NameAttribute(NameOID.COMMON_NAME, "TrainControl Local CA"),
+        x509.NameAttribute(NameOID.ORGANIZATION_NAME, "TrainControl"),
+    ])
+    subject = x509.Name([
+        x509.NameAttribute(NameOID.COMMON_NAME, common_name),
+        x509.NameAttribute(NameOID.ORGANIZATION_NAME, "TrainControl"),
+    ])
+
+    dns_names = {"localhost", socket.gethostname(), *HTTPS_HOSTNAMES}
+    ip_addresses = {ipaddress.ip_address("127.0.0.1")}
+    try:
+        for item in socket.getaddrinfo(socket.gethostname(), None, socket.AF_INET):
+            ip_addresses.add(ipaddress.ip_address(item[4][0]))
+    except OSError:
+        pass
+
+    now = datetime.utcnow()
+    ca_certificate = (
+        x509.CertificateBuilder()
+        .subject_name(ca_subject)
+        .issuer_name(ca_subject)
+        .public_key(ca_key.public_key())
+        .serial_number(x509.random_serial_number())
+        .not_valid_before(now - timedelta(days=1))
+        .not_valid_after(now + timedelta(days=3650))
+        .add_extension(x509.BasicConstraints(ca=True, path_length=0), critical=True)
+        .add_extension(
+            x509.KeyUsage(
+                digital_signature=True,
+                content_commitment=False,
+                key_encipherment=False,
+                data_encipherment=False,
+                key_agreement=False,
+                key_cert_sign=True,
+                crl_sign=True,
+                encipher_only=False,
+                decipher_only=False,
+            ),
+            critical=True,
+        )
+        .sign(ca_key, hashes.SHA256())
+    )
+    certificate = (
+        x509.CertificateBuilder()
+        .subject_name(subject)
+        .issuer_name(ca_certificate.subject)
+        .public_key(key.public_key())
+        .serial_number(x509.random_serial_number())
+        .not_valid_before(now - timedelta(days=1))
+        .not_valid_after(now + timedelta(days=365))
+        .add_extension(
+            x509.SubjectAlternativeName(
+                [x509.DNSName(name) for name in sorted(dns_names) if name]
+                + [x509.IPAddress(address) for address in sorted(ip_addresses, key=str)]
+            ),
+            critical=False,
+        )
+        .add_extension(x509.BasicConstraints(ca=False, path_length=None), critical=True)
+        .add_extension(
+            x509.KeyUsage(
+                digital_signature=True,
+                content_commitment=False,
+                key_encipherment=True,
+                data_encipherment=False,
+                key_agreement=False,
+                key_cert_sign=False,
+                crl_sign=False,
+                encipher_only=False,
+                decipher_only=False,
+            ),
+            critical=True,
+        )
+        .add_extension(
+            x509.ExtendedKeyUsage([ExtendedKeyUsageOID.SERVER_AUTH]),
+            critical=False,
+        )
+        .sign(ca_key, hashes.SHA256())
+    )
+
+    ca_key_path.write_bytes(ca_key.private_bytes(
+        encoding=serialization.Encoding.PEM,
+        format=serialization.PrivateFormat.TraditionalOpenSSL,
+        encryption_algorithm=serialization.NoEncryption(),
+    ))
+    key_path.write_bytes(key.private_bytes(
+        encoding=serialization.Encoding.PEM,
+        format=serialization.PrivateFormat.TraditionalOpenSSL,
+        encryption_algorithm=serialization.NoEncryption(),
+    ))
+    ca_pem = ca_certificate.public_bytes(serialization.Encoding.PEM)
+    ca_cert_path.write_bytes(ca_pem)
+    ca_install_path.write_bytes(ca_certificate.public_bytes(serialization.Encoding.DER))
+    cert_path.write_bytes(certificate.public_bytes(serialization.Encoding.PEM) + ca_pem)
+    print(f"Generated persistent HTTPS certificate: {cert_path}")
+    print(f"Install this CA once on client devices to remove browser warnings: {ca_install_path}")
+    return (str(cert_path), str(key_path))
+
+
 if __name__ == "__main__":
     initialize_app_runtime()
+    if USE_HTTPS:
+        ssl_context = build_https_ssl_context()
+        print(f"Web monitor is running at: https://127.0.0.1:{HTTPS_PORT}")
+        app.run(host=HOST, port=HTTPS_PORT, debug=False, threaded=True, ssl_context=ssl_context)
+        raise SystemExit(0)
+
     print(f"Web monitor is running at: http://127.0.0.1:{PORT}")
     try:
         from waitress import serve

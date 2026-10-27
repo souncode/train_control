@@ -9,6 +9,7 @@ def register_basic_routes(
     get_next_url,
     is_authenticated,
     load_user_credentials,
+    authenticate_user,
     verify_password,
     mark_authenticated,
     clear_auth,
@@ -27,11 +28,10 @@ def register_basic_routes(
             username = (request.form.get("username", "") or "").strip()
             password = request.form.get("password", "") or ""
             next_url = get_next_url(default="/")
-            creds = load_user_credentials()
-            expected_username = str(creds.get("username", "")).strip()
+            authed_username = authenticate_user(username, password)
 
-            if hmac.compare_digest(username, expected_username) and verify_password(password, creds):
-                mark_authenticated(expected_username)
+            if authed_username:
+                mark_authenticated(authed_username)
                 return redirect(next_url)
 
             return render_template(

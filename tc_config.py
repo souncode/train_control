@@ -16,8 +16,18 @@ def int_env(name: str, default: int, minimum: int | None = None, maximum: int | 
 
 ROOT_DIR = Path(r"D:\Object Detection\admin")
 TRAIN_FILE = "Train_model_AI.py"
-PORT = 820
-HOST = "0.0.0.0"
+PORT = int_env("TRAIN_CONTROL_PORT", 820, minimum=1, maximum=65535)
+HOST = os.getenv("TRAIN_CONTROL_HOST", "0.0.0.0").strip() or "0.0.0.0"
+USE_HTTPS = os.getenv("TRAIN_CONTROL_HTTPS", "0").strip().lower() in {"1", "true", "yes", "on"}
+BEHIND_HTTPS_PROXY = os.getenv("TRAIN_CONTROL_BEHIND_HTTPS_PROXY", "0").strip().lower() in {"1", "true", "yes", "on"}
+HTTPS_PORT = int_env("TRAIN_CONTROL_HTTPS_PORT", PORT, minimum=1, maximum=65535)
+HTTPS_CERT_FILE = os.getenv("TRAIN_CONTROL_HTTPS_CERT", "").strip()
+HTTPS_KEY_FILE = os.getenv("TRAIN_CONTROL_HTTPS_KEY", "").strip()
+HTTPS_HOSTNAMES = tuple(
+    value.strip()
+    for value in os.getenv("TRAIN_CONTROL_HTTPS_HOSTNAMES", "aisystemmyhome.ddns.net").split(",")
+    if value.strip()
+)
 CONTINUE_IF_ERROR = True
 WAITRESS_THREADS = int_env("TRAIN_CONTROL_WAITRESS_THREADS", 48, minimum=8, maximum=256)
 WAITRESS_CONNECTION_LIMIT = int_env("TRAIN_CONTROL_WAITRESS_CONNECTION_LIMIT", 1000, minimum=32, maximum=10000)
@@ -41,6 +51,8 @@ AUTH_SECRET_KEY = os.getenv("TRAIN_CONTROL_SECRET_KEY", "change_me_traincontrol_
 AUTH_SESSION_TTL_SECONDS = int(os.getenv("TRAIN_CONTROL_SESSION_TTL_SECONDS", "43200"))
 LV2_PASSWORD = os.getenv("TRAIN_CONTROL_LV2_PASSWORD", "080200")
 LV2_SESSION_TTL_SECONDS = int(os.getenv("TRAIN_CONTROL_LV2_SESSION_TTL_SECONDS", "1800"))
+LV3_PASSWORD = os.getenv("TRAIN_CONTROL_LV3_PASSWORD", "060400")
+LV3_SESSION_TTL_SECONDS = int(os.getenv("TRAIN_CONTROL_LV3_SESSION_TTL_SECONDS", "1800"))
 USER_FILE_NAME = "user.js"
 TRAIN_HISTORY_FILE_NAME = "train_history.jsonl"
 AUDIT_LOG_FILE_NAME = "audit_log.jsonl"

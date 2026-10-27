@@ -22,6 +22,18 @@
             background: linear-gradient(180deg, #0a1120 0%, #0b1220 100%);
             color: var(--text);
         }
+        body.msa-embed .container { max-width: none; padding: 0; }
+        body.msa-embed .top, body.msa-embed .side-card,
+        body.msa-embed .hint, body.msa-embed .image-info,
+        body.msa-embed .floating-toolbar-toggle { display: none; }
+        body.msa-embed .layout { display: block; }
+        body.msa-embed .card { border: 0; border-radius: 0; padding: 0; }
+        body.msa-embed .canvas-wrap { min-height: 0; height: calc(100vh - 80px); border: 0; border-radius: 0; }
+        body.msa-embed .floating-toolbar { position: static; transform: none; display: block; }
+        body.msa-embed .floating-toolbar-panel { border: 0; border-radius: 0; padding: 4px 8px; min-width: 0; box-shadow: none; }
+        body.msa-embed .floating-toolbar-panel button { width: auto; text-align: center; }
+        body.msa-embed .floating-toolbar-panel button:not(.btn-ok) { display: none; }
+        body.msa-embed .status-line { padding: 4px 8px; font-size: 12px; }
         .container {
             max-width: 1880px;
             margin: 0 auto;
@@ -49,32 +61,62 @@
         .btn-light { background: #1a2438; color: var(--text); border: 1px solid #2c3b55; }
         .btn-ok { background: var(--ok); color: #05200d; }
         .btn-danger { background: var(--danger); color: #fff; }
+        .btn-success { background: #22c55e; color: #05200d; }
+        .btn-predict { background: #0891b2; color: #ecfeff; }
 
         .layout {
             display: grid;
-            grid-template-columns: 1.8fr 0.9fr;
+            grid-template-columns: minmax(0, 1fr) 320px;
             gap: 14px;
         }
-        .layout-control {
+        .floating-toolbar {
+            position: fixed;
+            left: 0;
+            top: 92px;
+            z-index: 80;
             display: flex;
-            align-items: center;
-            gap: 10px;
-            margin: 10px 0 14px;
-            flex-wrap: wrap;
+            align-items: flex-start;
+            transform: translateX(calc(-100% + 42px));
+            transition: transform 0.18s ease;
         }
-        .action-toolbar {
+        .floating-toolbar.open {
+            transform: translateX(0);
+        }
+        .floating-toolbar-toggle {
+            width: 42px;
+            height: 42px;
+            border-radius: 0 10px 10px 0;
+            background: #1d4ed8;
+            color: #fff;
+            border: 1px solid #3b82f6;
+            border-left: 0;
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+            padding: 0;
+            font-size: 18px;
+            line-height: 1;
+        }
+        .floating-toolbar.open .floating-toolbar-toggle {
+            border-radius: 0 10px 10px 0;
+        }
+        .floating-toolbar-panel {
             display: flex;
-            align-items: center;
-            gap: 8px;
-            margin: -2px 0 14px;
-            flex-wrap: wrap;
+            flex-direction: column;
+            gap: 7px;
+            min-width: 190px;
+            padding: 10px;
+            border: 1px solid #2c3b55;
+            border-left: 0;
+            border-radius: 0 12px 12px 0;
+            background: rgba(15, 24, 42, 0.98);
+            box-shadow: 0 14px 36px rgba(0, 0, 0, 0.4);
         }
-        .layout-control label {
-            font-size: 12px;
-            color: var(--muted);
-        }
-        .layout-control input[type=\"range\"] {
-            width: 260px;
+        .floating-toolbar-panel button {
+            width: 100%;
+            min-height: 34px;
+            border-radius: 8px;
+            padding: 7px 10px;
+            text-align: left;
+            white-space: nowrap;
         }
         .card {
             border: 1px solid var(--line);
@@ -87,8 +129,8 @@
             width: 100%;
             min-height: 700px;
             display: flex;
-            align-items: center;
-            justify-content: center;
+            align-items: flex-start;
+            justify-content: flex-start;
             border: 1px dashed #2f405f;
             border-radius: 12px;
             background: #0c1425;
@@ -97,7 +139,7 @@
         }
         #editorCanvas {
             display: block;
-            max-width: 100%;
+            max-width: none;
             height: auto;
             cursor: crosshair;
             background: #0b1220;
@@ -131,6 +173,20 @@
         .class-popup-item.active {
             background: #1a2740;
         }
+        .class-popup-actions {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 6px;
+            margin-bottom: 6px;
+            padding-bottom: 6px;
+            border-bottom: 1px solid #263956;
+        }
+        .class-popup-actions button {
+            border-radius: 8px;
+            padding: 7px 8px;
+            font-size: 12px;
+            font-weight: 800;
+        }
 
         .field { margin-top: 10px; }
         .field label {
@@ -157,103 +213,227 @@
         .row { display: flex; gap: 8px; align-items: center; }
         .row.wrap { flex-wrap: wrap; }
 
+        .side-card {
+            padding: 10px;
+        }
+        .image-browser {
+            border: 1px solid #2b3d5a;
+            border-radius: 12px;
+            background: #0f182a;
+            overflow: hidden;
+        }
+        .image-browser-top {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) auto;
+            gap: 10px;
+            align-items: center;
+            padding: 10px;
+            border-bottom: 1px solid #20304a;
+            background: #111c31;
+        }
+        .image-browser-title {
+            min-width: 0;
+        }
+        .image-browser-title label {
+            display: block;
+            margin: 0 0 3px;
+            color: #c7d7ee;
+            font-size: 12px;
+            font-weight: 800;
+        }
+        .count-pill {
+            display: inline-flex;
+            align-items: center;
+            min-height: 22px;
+            padding: 3px 8px;
+            border: 1px solid #314562;
+            border-radius: 999px;
+            background: #142139;
+            color: #a9bddc;
+            font-size: 11px;
+            font-weight: 700;
+        }
+        .image-search-wrap {
+            min-width: 180px;
+            max-width: 260px;
+        }
+        .image-search-wrap input {
+            height: 34px;
+            padding: 7px 10px;
+            border-radius: 8px;
+        }
+        .image-filter-panel {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+            gap: 8px;
+            padding: 10px;
+            border-bottom: 1px solid #20304a;
+        }
+        .filter-group {
+            min-width: 0;
+            border: 1px solid #263956;
+            border-radius: 8px;
+            background: #0c1527;
+            padding: 8px;
+        }
+        .filter-title {
+            margin-bottom: 6px;
+            color: #9fb3d0;
+            font-size: 11px;
+            font-weight: 800;
+            text-transform: uppercase;
+        }
+        .filter-row {
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 6px;
+        }
+        .filter-row.two {
+            grid-template-columns: minmax(0, 1fr) 82px;
+        }
+        .filter-row.class-filter {
+            grid-template-columns: minmax(0, 1fr) 34px;
+        }
+        .class-filter-dropdown {
+            position: relative;
+            min-width: 0;
+        }
+        .class-filter-toggle {
+            width: 100%;
+            height: 30px;
+            padding: 5px 28px 5px 8px;
+            border: 1px solid #2c3b55;
+            border-radius: 7px;
+            background: #111a2e;
+            color: var(--text);
+            font-size: 11px;
+            font-weight: 700;
+            text-align: left;
+            overflow: hidden;
+            white-space: nowrap;
+            text-overflow: ellipsis;
+            position: relative;
+        }
+        .class-filter-toggle::after {
+            content: "▾";
+            position: absolute;
+            right: 8px;
+            top: 50%;
+            transform: translateY(-50%);
+            color: #9fb3d0;
+            font-size: 10px;
+        }
+        .class-filter-list {
+            position: absolute;
+            left: 0;
+            right: 0;
+            top: 34px;
+            z-index: 30;
+            max-height: 138px;
+            overflow-y: auto;
+            display: grid;
+            gap: 4px;
+            padding: 6px 4px;
+            border: 1px solid #2c3b55;
+            border-radius: 8px;
+            background: #0b1220;
+            box-shadow: 0 14px 30px rgba(0,0,0,0.32);
+        }
+        .class-filter-list.hidden {
+            display: none;
+        }
+        .class-filter-item {
+            display: grid;
+            grid-template-columns: 16px minmax(0, 1fr);
+            align-items: center;
+            gap: 6px;
+            min-height: 24px;
+            padding: 3px 5px;
+            border-radius: 6px;
+            color: #d7e3f5;
+            font-size: 11px;
+            font-weight: 700;
+            cursor: pointer;
+        }
+        .class-filter-item:hover {
+            background: #142033;
+        }
+        .class-filter-item input {
+            width: 13px;
+            height: 13px;
+            margin: 0;
+            accent-color: #3b82f6;
+        }
+        .class-filter-name {
+            overflow: hidden;
+            white-space: nowrap;
+            text-overflow: ellipsis;
+        }
+        .filter-group input,
+        .filter-group select {
+            height: 30px;
+            border-radius: 7px;
+            padding: 5px 7px;
+            font-size: 11px;
+            font-weight: 700;
+        }
+        .filter-group input[type="number"] {
+            appearance: textfield;
+            -moz-appearance: textfield;
+        }
+        .filter-group input[type="number"]::-webkit-outer-spin-button,
+        .filter-group input[type="number"]::-webkit-inner-spin-button {
+            -webkit-appearance: none;
+            margin: 0;
+        }
+        .filter-group .class-filter-item input {
+            width: 13px;
+            height: 13px;
+            padding: 0;
+            border-radius: 3px;
+        }
+        .filter-clear-btn {
+            height: 30px;
+            width: 34px;
+            padding: 0;
+            border-radius: 7px;
+            border: 1px solid #2c3b55;
+            background: #142033;
+            color: #b8c7dd;
+            line-height: 1;
+        }
+        .filter-clear-btn:hover {
+            border-color: #3b82f6;
+            color: #fff;
+        }
         .class-list {
             border: 1px solid #2f405f;
             border-radius: 10px;
             background: #0f182a;
             padding: 8px 10px;
-            max-height: 150px;
+            max-height: 110px;
             overflow: auto;
             font-family: Consolas, monospace;
             font-size: 12px;
             line-height: 1.45;
         }
         .image-list {
-            border: 1px solid #2f405f;
-            border-radius: 10px;
-            background: #0f182a;
-            max-height: 260px;
-            overflow: auto;
-            position: relative;
-        }
-        .image-table-head {
-            display: grid;
-            grid-template-columns: 54px minmax(0, 1.45fr) 0.95fr 138px 92px 0.7fr;
-            gap: 0;
-            border: 1px solid #2f405f;
-            border-bottom: 0;
-            border-radius: 10px 10px 0 0;
-            background: #12203a;
-            overflow: hidden;
-        }
-        .image-table-head .cell {
-            padding: 6px 8px;
-            border-right: 1px solid #243550;
-            font-size: 11px;
-            font-weight: 700;
-            color: #b8cae6;
-            text-transform: uppercase;
-        }
-        .image-table-head .cell:last-child { border-right: 0; }
-        .image-head-btn {
-            width: 100%;
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            gap: 8px;
-            background: transparent;
-            color: inherit;
             border: 0;
             border-radius: 0;
-            padding: 0;
-            font: inherit;
-            text-transform: inherit;
-        }
-        .image-head-btn:hover { color: #e6edf8; }
-        .image-head-label {
-            min-width: 0;
-            overflow: hidden;
-            text-overflow: ellipsis;
-            white-space: nowrap;
-        }
-        .image-head-sort {
-            flex: 0 0 auto;
-            color: #7ea2d8;
-            font-size: 11px;
-            min-width: 14px;
-            text-align: right;
-        }
-        .image-head-controls {
-            display: flex;
-            flex-direction: column;
-            gap: 4px;
-            min-width: 0;
-        }
-        .image-head-filter {
-            width: 100%;
-            border: 1px solid #2b3f60;
-            border-radius: 6px;
-            padding: 4px 6px;
             background: #0f182a;
-            color: #d5e4fb;
-            font-size: 11px;
-            font-weight: 600;
-        }
-        .image-head-number {
-            width: 100%;
-            border: 1px solid #2b3f60;
-            border-radius: 6px;
-            padding: 4px 6px;
-            background: #0f182a;
-            color: #d5e4fb;
-            font-size: 11px;
-            font-weight: 600;
+            height: 318px;
+            max-height: 318px;
+            overflow: auto;
+            position: relative;
+            padding: 4px 0;
         }
         .bbox-legend {
-            display: flex;
+            display: none;
             flex-wrap: wrap;
             gap: 8px 12px;
-            margin: 8px 0 6px;
+            margin: 0;
+            padding: 8px 10px;
+            border-bottom: 1px solid #20304a;
             font-size: 11px;
             color: #a9bddc;
         }
@@ -273,20 +453,23 @@
         .bbox-legend-swatch.greater { background: rgba(245, 158, 11, 0.32); }
         .bbox-legend-swatch.notequal { background: rgba(59, 130, 246, 0.28); }
         .image-list.table-mode {
-            border-radius: 0 0 10px 10px;
+            border-radius: 0;
         }
         .image-item {
-            border-bottom: 1px solid #1f2b41;
+            border-bottom: 0;
             font-size: 12px;
             cursor: pointer;
-            display: grid;
-            grid-template-columns: 54px minmax(0, 1.45fr) 0.95fr 138px 92px 0.7fr;
-            gap: 0;
-            align-items: stretch;
+            display: flex;
+            align-items: center;
+            gap: 7px;
+            margin: 1px 5px;
+            padding: 4px 7px;
+            border-radius: 5px;
+            min-width: 0;
         }
         .image-item:last-child { border-bottom: 0; }
-        .image-item.active { background: #1a2740; }
-        .image-item:hover { background: #142038; }
+        .image-item.active { background: #263654; }
+        .image-item:hover { background: #18243a; }
         .image-item.bbox-less { background: rgba(239, 68, 68, 0.14); }
         .image-item.bbox-equal { background: rgba(34, 197, 94, 0.14); }
         .image-item.bbox-greater { background: rgba(245, 158, 11, 0.14); }
@@ -296,28 +479,81 @@
         .image-item.bbox-greater.active { background: rgba(245, 158, 11, 0.24); }
         .image-item.bbox-notequal.active { background: rgba(59, 130, 246, 0.2); }
         .image-item .cell {
-            padding: 7px 10px;
-            border-right: 1px solid #1f2b41;
+            padding: 0;
+            border-right: 0;
             overflow: hidden;
             text-overflow: ellipsis;
             white-space: nowrap;
         }
         .image-item .cell:last-child { border-right: 0; }
         .image-item .cell.name {
-            white-space: normal;
-            overflow-wrap: anywhere;
-            line-height: 1.25;
+            flex: 1 1 auto;
+            min-width: 0;
+            white-space: nowrap;
+            line-height: 1.2;
+        }
+        .image-name-main {
+            color: #f1f7ff;
+            font-weight: 700;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        .image-name-sub {
+            display: none;
+            margin-top: 3px;
+            color: #7f93b2;
+            font-size: 10px;
+            line-height: 1.2;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
         }
         .image-item-meta { color: #8ea0ba; font-size: 11px; }
-        .image-item-index { color: #cfe0fb; font-variant-numeric: tabular-nums; }
-        .image-item-anomaly {
-            font-weight: 700;
+        .image-item-index {
+            color: #8fb7ff;
+            font-variant-numeric: tabular-nums;
+            flex: 0 0 auto;
+            width: 18px;
+            font-size: 11px;
         }
-        .image-item-anomaly.has {
-            color: #ff8f8f;
+        .image-item-count {
+            color: #d7e9ff;
+            background: #101b2d;
+            border: 1px solid #2a3c59;
+            border-radius: 999px;
+            padding: 2px 7px;
+            font-size: 11px;
+            font-weight: 800;
+            font-variant-numeric: tabular-nums;
+            flex: 0 0 auto;
         }
-        .image-item-anomaly.clean {
-            color: #7dd3a6;
+        .image-delete-btn {
+            width: 18px;
+            height: 18px;
+            flex: 0 0 18px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 5px;
+            padding: 0;
+            background: transparent;
+            color: #ff9a9a;
+            border: 1px solid transparent;
+            font-size: 14px;
+            line-height: 1;
+        }
+        .image-delete-btn:hover {
+            background: rgba(239, 68, 68, 0.22);
+            border-color: rgba(239, 68, 68, 0.55);
+            color: #fff;
+        }
+        .image-item-icon {
+            color: #72a8ff;
+            flex: 0 0 auto;
+            width: 13px;
+            font-size: 12px;
+            line-height: 1;
         }
         .image-list-spacer {
             position: relative;
@@ -328,6 +564,9 @@
             left: 0;
             right: 0;
             top: 0;
+        }
+        .advanced-label-raw {
+            display: none;
         }
 
         .box-list {
@@ -403,10 +642,34 @@
         @media (max-width: 1100px) {
             .layout { grid-template-columns: 1fr; }
             .canvas-wrap { min-height: 360px; }
+            .image-browser-top,
+            .image-filter-panel {
+                grid-template-columns: 1fr;
+            }
+            .image-search-wrap {
+                max-width: none;
+            }
         }
     </style>
 </head>
-<body>
+<body class="{% if request.args.get('msa') == '1' %}msa-embed{% endif %}">
+<div class="floating-toolbar" id="floatingToolbar">
+    <div class="floating-toolbar-panel">
+        <button class="btn-ok" onclick="saveLabel()">Save ảnh</button>
+        <button class="btn-success" onclick="openProjectDataUpload()">Add data</button>
+        <button class="btn-predict" onclick="runQuickPredictUnlabeled()">Quick Predict</button>
+        <button class="btn-primary" id="promoteTrainBtn" onclick="saveLabelAndMoveToTrain()" style="display:none">Save + Move to train</button>
+    </div>
+    <button class="floating-toolbar-toggle" type="button" onclick="toggleFloatingToolbar()" aria-label="Toggle toolbar">›</button>
+</div>
+<input
+    type="file"
+    id="projectDataInput"
+    accept=".zip,image/*"
+    multiple
+    style="display:none"
+    onchange="handleProjectDataUploadInput(this)"
+>
 <div class="container">
     <div class="top">
         <div>
@@ -416,22 +679,6 @@
         <div class="actions">
             <button class="btn-light" onclick="window.location.href='/'">Back</button>
         </div>
-    </div>
-
-    <div class="layout-control">
-        <label for="layoutRatio">Độ rộng khung ảnh</label>
-        <input id="layoutRatio" type="range" min="1.2" max="2.4" step="0.05" value="1.8" oninput="onLayoutRatioChanged(this.value)">
-        <span class="small" id="layoutRatioText">1.8fr</span>
-    </div>
-
-    <div class="action-toolbar">
-        <button class="btn-ok" onclick="saveLabel()">Save ảnh</button>
-        <button class="btn-primary" id="promoteTrainBtn" onclick="saveLabelAndMoveToTrain()" style="display:none">Save + Move to train</button>
-        <button class="btn-primary" onclick="nextImage()">Next ảnh</button>
-        <button class="btn-light" onclick="selectAllBoxes()">Select all</button>
-        <button class="btn-danger" onclick="deleteSelectedBoxes()">Xóa bbox đã chọn</button>
-        <button class="btn-danger" onclick="deleteSelectedBox()">Xóa bbox hiện tại</button>
-        <button class="btn-light" id="toggleBboxBtn" onclick="toggleBboxVisible()">Ẩn bbox</button>
     </div>
 
     <div class="layout">
@@ -459,35 +706,25 @@
             </div>
         </div>
 
-        <div class="card">
-            <div class="field">
-                <label>Ảnh (toàn bộ)</label>
-                <input id="imageSearch" type="text" placeholder="Tìm theo tên ảnh..." oninput="onImageSearchChanged()" />
-            </div>
-
-            <div class="field">
-                <label>Danh sách ảnh</label>
-                <div class="row wrap" style="margin-bottom:8px;">
-                    <span class="small" id="pageInfo">0 ảnh</span>
+        <div class="card side-card">
+            <div class="image-browser">
+                <div class="image-browser-top">
+                    <div class="image-browser-title">
+                        <label>Danh sách ảnh</label>
+                        <span class="count-pill" id="pageInfo">0 ảnh</span>
+                    </div>
+                    <div class="image-search-wrap">
+                        <input id="imageSearch" type="text" placeholder="Tìm tên ảnh..." oninput="onImageSearchChanged()" />
+                    </div>
                 </div>
+                <div class="image-filter-panel" id="imageFilterPanel"></div>
                 <div class="bbox-legend">
                     <span class="bbox-legend-item"><span class="bbox-legend-swatch less"></span>Thiếu</span>
                     <span class="bbox-legend-item"><span class="bbox-legend-swatch equal"></span>Đúng</span>
                     <span class="bbox-legend-item"><span class="bbox-legend-swatch greater"></span>Dư</span>
                     <span class="bbox-legend-item"><span class="bbox-legend-swatch notequal"></span>Khác</span>
                 </div>
-                <div class="image-table-head" id="imageTableHead"></div>
                 <div class="image-list table-mode" id="imageList"></div>
-            </div>
-
-            <div class="field">
-                <label>Class list (từ class.txt)</label>
-                <div class="class-list" id="classList">Loading classes...</div>
-            </div>
-
-            <div class="field">
-                <label>Bounding boxes</label>
-                <div class="box-list" id="boxList"></div>
             </div>
 
             <div class="field">
@@ -497,7 +734,7 @@
                 </div>
             </div>
 
-            <div class="field">
+            <div class="field advanced-label-raw">
                 <label>Raw label (.txt)</label>
                 <textarea id="rawLabel" readonly></textarea>
             </div>
@@ -508,6 +745,7 @@
 <script>
 const projectName = {{ project_name | tojson }};
 const editorQuery = new URLSearchParams(window.location.search);
+const msaMode = editorQuery.get('msa') === '1';
 const initialRel = editorQuery.get('rel') || '';
 const initialValidRel = editorQuery.get('valid_rel') || '';
 let images = [];
@@ -522,15 +760,15 @@ let currentQuery = '';
 let sortBy = 'name';
 let sortDir = 'asc';
 let classFilter = '';
+let classFilterOpen = false;
 let expectedBoxCount = '';
 let boxCompare = 'all';
 let anomalyFilter = 'all';
 let anomalySensitivity = 'medium';
 let pendingInitialRel = initialRel;
 let promoteValidRel = initialValidRel;
-let layoutLeftFr = 1.8;
 let bboxVisible = true;
-const imageRowHeight = 52;
+const imageRowHeight = 28;
 const imageListOverscan = 10;
 
 let canvas = null;
@@ -538,17 +776,25 @@ let ctx = null;
 let baseImg = null;
 let drawW = 0;
 let drawH = 0;
+let fitDrawW = 0;
+let fitDrawH = 0;
+let zoomLevel = 1;
+const minZoomLevel = 0.5;
+const maxZoomLevel = 5;
 
 let boxes = []; // [{cls, x, y, w, h}] in canvas pixels
 let selectedBox = -1;
 let selectedBoxes = new Set();
 let dragging = false;
 let drawMode = 'none'; // none | move | resize | draw
-let resizeHandle = ''; // nw|ne|sw|se
+let resizeHandle = ''; // n|ne|e|se|s|sw|w|nw
 let dragStart = {x: 0, y: 0};
 let dragOffset = {x: 0, y: 0};
+let dragStartBoxes = new Map();
 let classPopupState = { visible: false, boxIndex: -1 };
 let currentImageAnomalyItems = [];
+let labelDirty = false;
+let originalLabelText = '';
 
 function esc(text) {
     return String(text ?? '')
@@ -568,8 +814,55 @@ async function apiGet(url, opts = {}) {
     return data;
 }
 
+function uploadEditorFilesWithProgress(url, files, extraFields = {}, title = 'Đang upload...') {
+    return new Promise((resolve, reject) => {
+        const xhr = new XMLHttpRequest();
+        const fd = new FormData();
+        Array.from(files || []).forEach(file => fd.append('files', file));
+        if (files && files.length === 1) fd.append('file', files[0]);
+        Object.entries(extraFields || {}).forEach(([key, value]) => fd.append(key, value));
+
+        xhr.open('POST', url);
+        xhr.responseType = 'json';
+
+        xhr.upload.onprogress = (e) => {
+            const pct = e.lengthComputable ? (e.loaded / Math.max(1, e.total)) * 100 : 0;
+            setEditorLoadProgress(pct, title);
+        };
+        xhr.upload.onload = () => setEditorLoadProgress(100, 'Server đang xử lý...');
+        xhr.onload = () => {
+            const resp = xhr.response || {};
+            if (xhr.status >= 200 && xhr.status < 300 && resp.ok !== false) {
+                resolve(resp);
+                return;
+            }
+            reject(new Error(resp.message || `HTTP ${xhr.status}`));
+        };
+        xhr.onerror = () => reject(new Error('Upload lỗi mạng'));
+        xhr.onabort = () => reject(new Error('Upload đã bị hủy'));
+        xhr.send(fd);
+    });
+}
+
 function setStatus(text) {
     document.getElementById('statusLine').textContent = text;
+}
+
+function normalizeLabelText(text) {
+    return String(text || '').replace(/\r\n/g, '\n').trim();
+}
+
+function syncLabelDirty() {
+    labelDirty = normalizeLabelText(toYoloText()) !== originalLabelText;
+}
+
+function markLabelDirty() {
+    labelDirty = true;
+}
+
+function markLabelClean() {
+    originalLabelText = normalizeLabelText(toYoloText());
+    labelDirty = false;
 }
 
 function setEditorLoadProgress(percent, text = 'Loading...') {
@@ -613,31 +906,25 @@ function updatePromoteButton() {
     btn.style.display = enabled ? '' : 'none';
 }
 
-function applyLayoutRatio(leftFrRaw) {
-    const leftFr = Math.max(1.2, Math.min(2.4, Number(leftFrRaw || 1.8)));
-    layoutLeftFr = leftFr;
-    const rightFr = Math.max(0.7, 3.0 - leftFr);
-
-    const layout = document.querySelector('.layout');
-    if (layout) {
-        if (window.innerWidth <= 1100) {
-            layout.style.gridTemplateColumns = '1fr';
-        } else {
-            layout.style.gridTemplateColumns = `${leftFr.toFixed(2)}fr ${rightFr.toFixed(2)}fr`;
-        }
-    }
-
-    const txt = document.getElementById('layoutRatioText');
-    if (txt) txt.textContent = `${leftFr.toFixed(2)}fr`;
-}
-
-function onLayoutRatioChanged(v) {
-    applyLayoutRatio(v);
+function notifyDataChanged(action = 'label') {
     try {
-        localStorage.setItem('project_editor_left_fr', String(layoutLeftFr));
+        localStorage.setItem('train_control_data_changed', JSON.stringify({
+            project: projectName,
+            action,
+            ts: Date.now()
+        }));
     } catch (e) {
         // ignore storage errors
     }
+}
+
+function toggleFloatingToolbar() {
+    const toolbar = document.getElementById('floatingToolbar');
+    if (!toolbar) return;
+    const open = !toolbar.classList.contains('open');
+    toolbar.classList.toggle('open', open);
+    const btn = toolbar.querySelector('.floating-toolbar-toggle');
+    if (btn) btn.textContent = open ? '‹' : '›';
 }
 
 function setImageInfo(name, modifiedAt, linkHref) {
@@ -666,21 +953,22 @@ function sortIndicatorFor(field) {
 }
 
 function renderImageTableHead() {
-    const head = document.getElementById('imageTableHead');
-    if (!head) return;
-    const classOptions = ['<option value="">Tất cả</option>']
-        .concat(classes.map((name, i) => `<option value="${i}" ${String(classFilter) === String(i) ? 'selected' : ''}>${esc(i)}: ${esc(name)}</option>`))
-        .join('');
-    const anomalyOptions = [
-        ['all', 'Tất cả'],
-        ['has', 'Có ABN'],
-        ['clean', 'Sạch'],
-    ].map(([value, label]) => `<option value="${value}" ${anomalyFilter === value ? 'selected' : ''}>${esc(label)}</option>`).join('');
-    const anomalySensitivityOptions = [
-        ['low', 'Nhẹ'],
-        ['medium', 'Vừa'],
-        ['high', 'Nhạy'],
-    ].map(([value, label]) => `<option value="${value}" ${anomalySensitivity === value ? 'selected' : ''}>${esc(label)}</option>`).join('');
+    const filterPanel = document.getElementById('imageFilterPanel');
+    const selectedClassIds = new Set(String(classFilter || '').split(',').map(x => x.trim()).filter(Boolean));
+    const classSummary = selectedClassIds.size ? `${selectedClassIds.size} class đang lọc` : 'Tất cả class';
+    const classChecks = classes.length
+        ? classes.map((name, i) => `
+            <label class="class-filter-item" title="${esc(i)}: ${esc(name)}">
+                <input
+                    type="checkbox"
+                    value="${i}"
+                    ${selectedClassIds.has(String(i)) ? 'checked' : ''}
+                    onchange="onClassFilterCheckboxChanged()"
+                >
+                <span class="class-filter-name">${esc(i)}: ${esc(name)}</span>
+            </label>
+        `).join('')
+        : '<div class="small">Không có class</div>';
     const boxCompareOptions = [
         ['all', 'Tất cả'],
         ['less', 'Thiếu'],
@@ -689,66 +977,49 @@ function renderImageTableHead() {
         ['notequal', 'Khác'],
     ].map(([value, label]) => `<option value="${value}" ${boxCompare === value ? 'selected' : ''}>${esc(label)}</option>`).join('');
 
-    head.innerHTML = `
-        <div class="cell">#</div>
-        <div class="cell">
-            <button type="button" class="image-head-btn" onclick="toggleImageSort('name')" title="Sort theo tên ảnh">
-                <span class="image-head-label">Tên ảnh</span>
-                <span class="image-head-sort">${sortIndicatorFor('name')}</span>
-            </button>
-        </div>
-        <div class="cell">
-            <button type="button" class="image-head-btn" onclick="toggleImageSort('date')" title="Sort theo ngày sửa">
-                <span class="image-head-label">Ngày sửa</span>
-                <span class="image-head-sort">${sortIndicatorFor('date')}</span>
-            </button>
-        </div>
-        <div class="cell">
-            <div class="image-head-controls">
-                <button type="button" class="image-head-btn" title="So sánh số bbox">
-                    <span class="image-head-label">BBox</span>
-                    <span class="image-head-sort"></span>
-                </button>
-                <input
-                    type="number"
-                    min="0"
-                    class="image-head-number"
-                    id="expectedBoxCountHead"
-                    placeholder="Số kỳ vọng"
-                    value="${esc(expectedBoxCount)}"
-                    oninput="onExpectedBoxCountChanged(this.value)"
-                >
-                <select class="image-head-filter" id="boxCompareHead" onchange="onBoxCompareChanged(this.value)">
-                    ${boxCompareOptions}
-                </select>
+    if (filterPanel) {
+        filterPanel.innerHTML = `
+            <div class="filter-group">
+                <div class="filter-title">BBox</div>
+                <div class="filter-row two">
+                    <input
+                        type="number"
+                        min="0"
+                        id="expectedBoxCountHead"
+                        placeholder="Số kỳ vọng"
+                        value="${esc(expectedBoxCount)}"
+                        oninput="onExpectedBoxCountChanged(this.value)"
+                    >
+                    <select id="boxCompareHead" onchange="onBoxCompareChanged(this.value)">
+                        ${boxCompareOptions}
+                    </select>
+                </div>
             </div>
-        </div>
-        <div class="cell">
-            <div class="image-head-controls">
-                <button type="button" class="image-head-btn" title="Bbox bất thường theo trung bình class">
-                    <span class="image-head-label">ABN</span>
-                    <span class="image-head-sort"></span>
-                </button>
-                <select class="image-head-filter" id="anomalyFilterHead" onchange="onAnomalyFilterChanged(this.value)">
-                    ${anomalyOptions}
-                </select>
-                <select class="image-head-filter" id="anomalySensitivityHead" onchange="onAnomalySensitivityChanged(this.value)">
-                    ${anomalySensitivityOptions}
-                </select>
+            <div class="filter-group">
+                <div class="filter-title">Class</div>
+                <div class="filter-row class-filter">
+                    <div class="class-filter-dropdown" id="classFilterDropdown">
+                        <button
+                            type="button"
+                            class="class-filter-toggle"
+                            title="${esc(classSummary)}"
+                            onclick="toggleClassFilterDropdown(event)"
+                        >${esc(classSummary)}</button>
+                        <div class="class-filter-list ${classFilterOpen ? '' : 'hidden'}" id="classFilterList">
+                            ${classChecks}
+                        </div>
+                    </div>
+                    <button
+                        type="button"
+                        class="filter-clear-btn"
+                        title="Bỏ lọc class"
+                        onclick="onHeaderClassFilterChanged('')"
+                    >×</button>
+                </div>
             </div>
-        </div>
-        <div class="cell">
-            <div class="image-head-controls">
-                <button type="button" class="image-head-btn" onclick="toggleImageSort('class')" title="Sort theo class">
-                    <span class="image-head-label">Class</span>
-                    <span class="image-head-sort">${sortIndicatorFor('class')}</span>
-                </button>
-                <select class="image-head-filter" id="classFilterHead" onchange="onHeaderClassFilterChanged(this.value)">
-                    ${classOptions}
-                </select>
-            </div>
-        </div>
-    `;
+        `;
+    }
+
 }
 
 function toggleBboxVisible() {
@@ -763,6 +1034,36 @@ function classNameByIndex(i) {
     return `class_${i}`;
 }
 
+function bboxColorForClass(clsIndex, anomaly = false) {
+    const name = String(classNameByIndex(clsIndex) || '').trim().toUpperCase();
+    if (name.endsWith('_NG')) {
+        return {
+            stroke: '#ef4444',
+            fill: 'rgba(239,68,68,0.14)',
+            label: 'rgba(239,68,68,0.95)',
+        };
+    }
+    if (name.endsWith('_OK')) {
+        return {
+            stroke: '#22c55e',
+            fill: 'rgba(34,197,94,0.14)',
+            label: 'rgba(34,197,94,0.95)',
+        };
+    }
+    if (anomaly) {
+        return {
+            stroke: '#ef4444',
+            fill: 'rgba(239,68,68,0.14)',
+            label: 'rgba(239,68,68,0.95)',
+        };
+    }
+    return {
+        stroke: '#3b82f6',
+        fill: 'rgba(59,130,246,0.16)',
+        label: 'rgba(59,130,246,0.95)',
+    };
+}
+
 function clamp(v, min, max) {
     return Math.max(min, Math.min(max, v));
 }
@@ -772,6 +1073,55 @@ function canvasPointFromEvent(e) {
     const x = (e.clientX - rect.left) * (canvas.width / rect.width);
     const y = (e.clientY - rect.top) * (canvas.height / rect.height);
     return { x, y };
+}
+
+function scaleBoxes(scale) {
+    boxes.forEach(b => {
+        b.x *= scale;
+        b.y *= scale;
+        b.w *= scale;
+        b.h *= scale;
+    });
+}
+
+function setCanvasZoom(newZoom, anchorEvent = null) {
+    if (!canvas || !baseImg || !fitDrawW || !fitDrawH) return;
+    const nextZoom = clamp(Number(newZoom) || 1, minZoomLevel, maxZoomLevel);
+    const scale = nextZoom / Math.max(0.0001, zoomLevel);
+    if (Math.abs(scale - 1) < 0.001) return;
+
+    const wrap = document.querySelector('.canvas-wrap');
+    const beforeRect = canvas.getBoundingClientRect();
+    const anchorClientX = anchorEvent ? anchorEvent.clientX : beforeRect.left + beforeRect.width / 2;
+    const anchorClientY = anchorEvent ? anchorEvent.clientY : beforeRect.top + beforeRect.height / 2;
+    const anchorX = (anchorClientX - beforeRect.left) * (canvas.width / Math.max(1, beforeRect.width));
+    const anchorY = (anchorClientY - beforeRect.top) * (canvas.height / Math.max(1, beforeRect.height));
+
+    zoomLevel = nextZoom;
+    scaleBoxes(scale);
+    drawW = Math.max(1, Math.round(fitDrawW * zoomLevel));
+    drawH = Math.max(1, Math.round(fitDrawH * zoomLevel));
+    canvas.width = drawW;
+    canvas.height = drawH;
+    draw();
+
+    if (wrap) {
+        const afterRect = canvas.getBoundingClientRect();
+        const nextClientX = afterRect.left + (anchorX * scale) * (afterRect.width / Math.max(1, canvas.width));
+        const nextClientY = afterRect.top + (anchorY * scale) * (afterRect.height / Math.max(1, canvas.height));
+        wrap.scrollLeft += nextClientX - anchorClientX;
+        wrap.scrollTop += nextClientY - anchorClientY;
+    }
+}
+
+function onCanvasWheel(e) {
+    if (!canvas || !baseImg) return;
+    const rect = canvas.getBoundingClientRect();
+    const insideCanvas = e.clientX >= rect.left && e.clientX <= rect.right && e.clientY >= rect.top && e.clientY <= rect.bottom;
+    if (!insideCanvas) return;
+    e.preventDefault();
+    const factor = e.deltaY < 0 ? 1.12 : 1 / 1.12;
+    setCanvasZoom(zoomLevel * factor, e);
 }
 
 function hitBoxIndex(x, y) {
@@ -799,6 +1149,32 @@ function getBoxLabelRect(b) {
     };
 }
 
+function getBoxActionRects(b) {
+    const labelRect = getBoxLabelRect(b);
+    const gap = 3;
+    const size = 18;
+    const y = labelRect.y;
+    const dupX = Math.min(drawW - (size * 2 + gap), labelRect.x + labelRect.w + gap);
+    return {
+        duplicate: {x: dupX, y, w: size, h: size},
+        delete: {x: dupX + size + gap, y, w: size, h: size},
+    };
+}
+
+function hitBoxAction(x, y) {
+    if (!ctx) return null;
+    for (let i = boxes.length - 1; i >= 0; i--) {
+        const rects = getBoxActionRects(boxes[i]);
+        for (const action of ['duplicate', 'delete']) {
+            const r = rects[action];
+            if (x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h) {
+                return { index: i, action };
+            }
+        }
+    }
+    return null;
+}
+
 function hitBoxLabelIndex(x, y) {
     if (!ctx) return -1;
     for (let i = boxes.length - 1; i >= 0; i--) {
@@ -814,16 +1190,20 @@ function hitBoxLabelIndex(x, y) {
 function handlePoints(b) {
     return {
         nw: {x: b.x, y: b.y},
+        n: {x: b.x + b.w / 2, y: b.y},
         ne: {x: b.x + b.w, y: b.y},
-        sw: {x: b.x, y: b.y + b.h},
+        e: {x: b.x + b.w, y: b.y + b.h / 2},
         se: {x: b.x + b.w, y: b.y + b.h},
+        s: {x: b.x + b.w / 2, y: b.y + b.h},
+        sw: {x: b.x, y: b.y + b.h},
+        w: {x: b.x, y: b.y + b.h / 2},
     };
 }
 
 function hitResizeHandle(x, y, b) {
     const pts = handlePoints(b);
     const r = 9;
-    for (const key of ['nw', 'ne', 'sw', 'se']) {
+    for (const key of ['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w']) {
         const p = pts[key];
         if (Math.abs(x - p.x) <= r && Math.abs(y - p.y) <= r) {
             return key;
@@ -903,7 +1283,9 @@ function formatAnomalyReasonText(anomalyItem) {
 async function refreshCurrentImageAnomalies(rel = '') {
     const currentRel = String(rel || images[idx] || '').trim();
     if (!currentRel) return;
-    const data = await apiGet(`/api/project_label?project=${encodeURIComponent(projectName)}&rel=${encodeURIComponent(currentRel)}&anomaly_sensitivity=${encodeURIComponent(anomalySensitivity)}`);
+    const data = await apiGet(msaMode
+        ? `/api/project/msa/label?project=${encodeURIComponent(projectName)}&rel=${encodeURIComponent(currentRel)}`
+        : `/api/project_label?project=${encodeURIComponent(projectName)}&rel=${encodeURIComponent(currentRel)}&anomaly_sensitivity=${encodeURIComponent(anomalySensitivity)}`);
     currentImageAnomalyItems = Array.isArray(data.anomaly_items) ? data.anomaly_items : [];
     const anomalyIndexSet = new Set(Array.isArray(data.anomaly_box_indices) ? data.anomaly_box_indices.map(x => Number(x)) : []);
     boxes.forEach((box, boxIndex) => {
@@ -925,6 +1307,7 @@ function setCurrentImageStatus(rel, bboxAnomalyCount = 0, prefix = '') {
 
 function renderBoxList() {
     const boxList = document.getElementById('boxList');
+    if (!boxList) return;
     if (!boxes.length) {
         boxList.innerHTML = '<div class="box-item">No boxes</div>';
         return;
@@ -942,6 +1325,7 @@ function renderBoxList() {
 
 function renderClassSelect() {
     const sel = document.getElementById('boxClassSelect');
+    if (!sel) return;
     if (!classes.length) {
         sel.innerHTML = '<option value="0">0</option>';
     } else {
@@ -973,7 +1357,13 @@ function showClassPopupForBox(boxIndex, rect) {
         `).join('')
         : `<button type="button" class="class-popup-item active" onclick="selectClassFromPopup(${boxIndex}, ${currentCls})">${esc(currentCls)}: ${esc(classNameByIndex(currentCls))}</button>`;
 
-    el.innerHTML = rows;
+    el.innerHTML = `
+        <div class="class-popup-actions">
+            <button type="button" class="btn-light" onclick="duplicateBox(${boxIndex})">Duplicate</button>
+            <button type="button" class="btn-danger" onclick="deleteBoxByIndex(${boxIndex})">Xóa</button>
+        </div>
+        ${rows}
+    `;
     el.classList.remove('hidden');
     classPopupState.visible = true;
     classPopupState.boxIndex = boxIndex;
@@ -989,9 +1379,41 @@ function selectClassFromPopup(boxIndex, clsIndex) {
     boxes[boxIndex].cls = Number(clsIndex || 0);
     selectedBox = boxIndex;
     selectedBoxes = new Set([boxIndex]);
+    markLabelDirty();
     hideClassPopup();
     draw();
     setStatus(`Đã đổi class bbox #${boxIndex + 1} -> ${classNameByIndex(boxes[boxIndex].cls)}`);
+}
+
+function duplicateBox(boxIndex) {
+    if (boxIndex < 0 || !boxes[boxIndex]) return;
+    const src = boxes[boxIndex];
+    const offset = Math.max(6, Math.round(Math.min(src.w, src.h) * 0.06));
+    const copy = {
+        ...src,
+        x: clamp(src.x + offset, 0, Math.max(0, drawW - src.w)),
+        y: clamp(src.y + offset, 0, Math.max(0, drawH - src.h)),
+        isAnomaly: false,
+    };
+    boxes.push(copy);
+    selectedBox = boxes.length - 1;
+    selectedBoxes = new Set([selectedBox]);
+    markLabelDirty();
+    hideClassPopup();
+    draw();
+    setStatus(`Đã duplicate bbox #${boxIndex + 1}`);
+}
+
+function deleteBoxByIndex(boxIndex) {
+    if (boxIndex < 0 || !boxes[boxIndex]) return;
+    boxes.splice(boxIndex, 1);
+    selectedBoxes = new Set();
+    selectedBox = boxes.length ? Math.min(boxIndex, boxes.length - 1) : -1;
+    if (selectedBox >= 0) selectedBoxes.add(selectedBox);
+    markLabelDirty();
+    hideClassPopup();
+    draw();
+    setStatus(`Đã xóa bbox #${boxIndex + 1}`);
 }
 
 function draw() {
@@ -1009,9 +1431,10 @@ function draw() {
     boxes.forEach((b, i) => {
         const active = selectedBoxes.has(i);
         const anomaly = !!b.isAnomaly;
+        const color = bboxColorForClass(b.cls, anomaly);
         ctx.lineWidth = active ? 3 : 2;
-        ctx.strokeStyle = active ? '#22c55e' : (anomaly ? '#ef4444' : '#3b82f6');
-        ctx.fillStyle = active ? 'rgba(34,197,94,0.16)' : (anomaly ? 'rgba(239,68,68,0.14)' : 'rgba(59,130,246,0.16)');
+        ctx.strokeStyle = active ? '#facc15' : color.stroke;
+        ctx.fillStyle = active ? 'rgba(250,204,21,0.16)' : color.fill;
 
         ctx.fillRect(b.x, b.y, b.w, b.h);
         ctx.strokeRect(b.x, b.y, b.w, b.h);
@@ -1022,15 +1445,29 @@ function draw() {
         const th = 18;
         const tx = b.x;
         const ty = Math.max(0, b.y - th);
-        ctx.fillStyle = active ? 'rgba(34,197,94,0.95)' : (anomaly ? 'rgba(239,68,68,0.95)' : 'rgba(59,130,246,0.95)');
+        ctx.fillStyle = active ? 'rgba(250,204,21,0.95)' : color.label;
         ctx.fillRect(tx, ty, tw, th);
         ctx.fillStyle = '#001020';
         ctx.fillText(label, tx + 5, ty + 13);
 
+        const actions = getBoxActionRects(b);
+        ctx.font = 'bold 11px Segoe UI';
+        ctx.fillStyle = 'rgba(15,24,42,0.92)';
+        ctx.fillRect(actions.duplicate.x, actions.duplicate.y, actions.duplicate.w, actions.duplicate.h);
+        ctx.fillRect(actions.delete.x, actions.delete.y, actions.delete.w, actions.delete.h);
+        ctx.strokeStyle = 'rgba(255,255,255,0.45)';
+        ctx.lineWidth = 1;
+        ctx.strokeRect(actions.duplicate.x + 0.5, actions.duplicate.y + 0.5, actions.duplicate.w - 1, actions.duplicate.h - 1);
+        ctx.strokeRect(actions.delete.x + 0.5, actions.delete.y + 0.5, actions.delete.w - 1, actions.delete.h - 1);
+        ctx.fillStyle = '#9dd6ff';
+        ctx.fillText('D', actions.duplicate.x + 5, actions.duplicate.y + 13);
+        ctx.fillStyle = '#ffb4b4';
+        ctx.fillText('X', actions.delete.x + 5, actions.delete.y + 13);
+
         if (i === selectedBox) {
             const pts = handlePoints(b);
             ctx.fillStyle = '#22c55e';
-            for (const key of ['nw', 'ne', 'sw', 'se']) {
+            for (const key of ['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w']) {
                 const p = pts[key];
                 ctx.fillRect(p.x - 4, p.y - 4, 8, 8);
             }
@@ -1059,6 +1496,7 @@ function changeSelectedBoxClass() {
     const cls = parseInt(sel.value, 10);
     if (Number.isNaN(cls)) return;
     boxes[selectedBox].cls = cls;
+    markLabelDirty();
     hideClassPopup();
     draw();
 }
@@ -1067,6 +1505,7 @@ function deleteSelectedBox() {
     if (selectedBox < 0 || !boxes[selectedBox]) return;
     hideClassPopup();
     boxes.splice(selectedBox, 1);
+    markLabelDirty();
     selectedBoxes = new Set();
     selectedBox = boxes.length ? Math.min(selectedBox, boxes.length - 1) : -1;
     if (selectedBox >= 0) selectedBoxes.add(selectedBox);
@@ -1079,10 +1518,44 @@ function selectAllBoxes() {
     draw();
 }
 
+function captureSelectedBoxPositions() {
+    dragStartBoxes = new Map();
+    selectedBoxes.forEach(i => {
+        const b = boxes[i];
+        if (!b) return;
+        dragStartBoxes.set(i, { x: b.x, y: b.y, w: b.w, h: b.h });
+    });
+}
+
+function moveSelectedBoxesFromDrag(dx, dy) {
+    if (!dragStartBoxes.size) return;
+    let minDx = -Infinity;
+    let maxDx = Infinity;
+    let minDy = -Infinity;
+    let maxDy = Infinity;
+
+    dragStartBoxes.forEach(pos => {
+        minDx = Math.max(minDx, -pos.x);
+        maxDx = Math.min(maxDx, drawW - (pos.x + pos.w));
+        minDy = Math.max(minDy, -pos.y);
+        maxDy = Math.min(maxDy, drawH - (pos.y + pos.h));
+    });
+
+    const safeDx = clamp(dx, minDx, maxDx);
+    const safeDy = clamp(dy, minDy, maxDy);
+    dragStartBoxes.forEach((pos, i) => {
+        const b = boxes[i];
+        if (!b) return;
+        b.x = pos.x + safeDx;
+        b.y = pos.y + safeDy;
+    });
+}
+
 function deleteSelectedBoxes() {
     if (!selectedBoxes.size) return;
     hideClassPopup();
     boxes = boxes.filter((_, i) => !selectedBoxes.has(i));
+    markLabelDirty();
     selectedBoxes = new Set();
     selectedBox = boxes.length ? 0 : -1;
     if (selectedBox >= 0) selectedBoxes.add(selectedBox);
@@ -1093,15 +1566,19 @@ async function loadClasses() {
     try {
         const data = await apiGet(`/api/project_classes?project=${encodeURIComponent(projectName)}`);
         classes = Array.isArray(data.classes) ? data.classes : [];
-        if (classes.length === 0) {
-            document.getElementById('classList').textContent = 'Không tìm thấy class.txt hoặc classes.txt';
-        } else {
-            document.getElementById('classList').innerHTML = classes.map((x, i) => `${i}: ${esc(x)}`).join('<br>');
+        const classListEl = document.getElementById('classList');
+        if (classListEl) {
+            if (classes.length === 0) {
+                classListEl.textContent = 'Không tìm thấy class.txt hoặc classes.txt';
+            } else {
+                classListEl.innerHTML = classes.map((x, i) => `${i}: ${esc(x)}`).join('<br>');
+            }
         }
         renderImageTableHead();
         renderClassSelect();
     } catch (e) {
-        document.getElementById('classList').textContent = String(e.message || e);
+        const classListEl = document.getElementById('classList');
+        if (classListEl) classListEl.textContent = String(e.message || e);
     }
 }
 
@@ -1125,9 +1602,7 @@ function renderImageList() {
     for (let i = start; i < end; i += 1) {
         const it = imageItems[i];
         const active = i === idx ? 'active' : '';
-        const clsText = Array.isArray(it.class_ids) && it.class_ids.length ? it.class_ids.join(',') : '-';
         const bboxCount = Number(it.bbox_count || 0);
-        const anomalyCount = Number(it.bbox_anomaly_count || 0);
         let compareClass = '';
         if (String(expectedBoxCount || '').trim() !== '') {
             const expected = Number(expectedBoxCount);
@@ -1142,12 +1617,13 @@ function renderImageList() {
         }
         rows.push(`
             <div class="image-item ${active} ${compareClass}" style="height:${imageRowHeight}px" onclick="selectImageByIndex(${i})">
-                <div class="cell image-item-index">${i + 1}</div>
-                <div class="cell name" title="${esc(it.name || it.rel)}">${esc(it.name || it.rel)}</div>
-                <div class="cell image-item-meta" title="${esc(it.modified_at || '-')}">${esc(it.modified_at || '-')}</div>
-                <div class="cell image-item-index" title="BBox: ${bboxCount}">${bboxCount}</div>
-                <div class="cell image-item-anomaly ${anomalyCount > 0 ? 'has' : 'clean'}" title="BBox bất thường: ${anomalyCount}">${anomalyCount > 0 ? `! ${anomalyCount}` : '0'}</div>
-                <div class="cell image-item-meta" title="${esc(clsText)}">${esc(clsText)}</div>
+                <button type="button" class="image-delete-btn" title="Xóa ảnh" onclick="deleteImageByIndex(event, ${i})">×</button>
+                <div class="image-item-icon">◆</div>
+                <div class="cell name" title="${esc(it.rel || it.name || '')}">
+                    <div class="image-name-main">${esc(it.name || it.rel)}</div>
+                    <div class="image-name-sub">${esc(it.modified_at || '-')}</div>
+                </div>
+                <div class="image-item-count" title="BBox: ${bboxCount}">${bboxCount}</div>
             </div>
         `);
     }
@@ -1177,11 +1653,16 @@ function ensureImageIndexVisible(targetIndex) {
 }
 
 async function loadImages(page = 1, query = currentQuery) {
+    if (images[idx]) {
+        await saveCurrentLabelIfDirty();
+    }
     setEditorLoadProgress(5, 'Đang tải danh sách ảnh...');
     currentQuery = String(query || '').trim();
     const targetRel = pendingInitialRel || '';
     const expectedBoxesParam = String(expectedBoxCount || '').trim();
-    const data = await apiGet(`/api/project_images?project=${encodeURIComponent(projectName)}&page=${page}&page_size=${pageSize}&q=${encodeURIComponent(currentQuery)}&sort_by=${encodeURIComponent(sortBy)}&sort_dir=${encodeURIComponent(sortDir)}&class_filter=${encodeURIComponent(classFilter)}&expected_boxes=${encodeURIComponent(expectedBoxesParam)}&box_compare=${encodeURIComponent(boxCompare)}&anomaly_filter=${encodeURIComponent(anomalyFilter)}&anomaly_sensitivity=${encodeURIComponent(anomalySensitivity)}&rel=${encodeURIComponent(targetRel)}`);
+    const data = await apiGet(msaMode
+        ? `/api/project/msa/images?project=${encodeURIComponent(projectName)}`
+        : `/api/project_images?project=${encodeURIComponent(projectName)}&page=${page}&page_size=${pageSize}&q=${encodeURIComponent(currentQuery)}&sort_by=${encodeURIComponent(sortBy)}&sort_dir=${encodeURIComponent(sortDir)}&class_filter=${encodeURIComponent(classFilter)}&expected_boxes=${encodeURIComponent(expectedBoxesParam)}&box_compare=${encodeURIComponent(boxCompare)}&anomaly_filter=${encodeURIComponent(anomalyFilter)}&anomaly_sensitivity=${encodeURIComponent(anomalySensitivity)}&rel=${encodeURIComponent(targetRel)}`);
     setEditorLoadProgress(45, 'Đã nhận danh sách ảnh, đang xử lý...');
     images = Array.isArray(data.images) ? data.images : [];
     imageItems = Array.isArray(data.items) ? data.items : images.map(rel => ({rel, name: rel, modified_at: '-', class_ids: []}));
@@ -1232,6 +1713,28 @@ function toggleImageSort(field) {
 
 function onHeaderClassFilterChanged(value) {
     classFilter = String(value || '');
+    classFilterOpen = false;
+    renderImageTableHead();
+    loadImages(1, currentQuery);
+}
+
+function toggleClassFilterDropdown(event) {
+    if (event) {
+        event.preventDefault();
+        event.stopPropagation();
+    }
+    classFilterOpen = !classFilterOpen;
+    renderImageTableHead();
+}
+
+function onClassFilterCheckboxChanged() {
+    const list = document.getElementById('classFilterList');
+    if (!list) return;
+    const selected = Array.from(list.querySelectorAll('input[type="checkbox"]:checked'))
+        .map(input => String(input.value || '').trim())
+        .filter(Boolean);
+    classFilter = selected.join(',');
+    classFilterOpen = true;
     renderImageTableHead();
     loadImages(1, currentQuery);
 }
@@ -1266,7 +1769,9 @@ async function loadCurrentImageAndLabel() {
     setEditorLoadProgress(10, `Đang tải ảnh: ${rel}`);
 
     const img = new Image();
-    img.src = `/api/project_image_file?project=${encodeURIComponent(projectName)}&rel=${encodeURIComponent(rel)}&t=${Date.now()}`;
+    img.src = msaMode
+        ? `/api/project/msa/file?project=${encodeURIComponent(projectName)}&rel=${encodeURIComponent(`images/${rel}`)}`
+        : `/api/project_image_file?project=${encodeURIComponent(projectName)}&rel=${encodeURIComponent(rel)}`;
     await new Promise((resolve, reject) => {
         img.onload = resolve;
         img.onerror = reject;
@@ -1275,16 +1780,21 @@ async function loadCurrentImageAndLabel() {
 
     baseImg = img;
     const wrap = document.querySelector('.canvas-wrap');
-    const maxW = Math.max(900, Math.floor((wrap ? wrap.clientWidth : 1400) - 24));
-    const maxH = Math.max(650, window.innerHeight - 220);
+    const maxW = msaMode ? Math.max(1, (wrap?.clientWidth || 700) - 4) : Math.max(900, Math.floor((wrap ? wrap.clientWidth : 1400) - 24));
+    const maxH = msaMode ? Math.max(1, (wrap?.clientHeight || 500) - 4) : Math.max(650, window.innerHeight - 220);
     const ratio = Math.min(maxW / img.naturalWidth, maxH / img.naturalHeight, 1);
     drawW = Math.max(1, Math.round(img.naturalWidth * ratio));
     drawH = Math.max(1, Math.round(img.naturalHeight * ratio));
+    fitDrawW = drawW;
+    fitDrawH = drawH;
+    zoomLevel = 1;
 
     canvas.width = drawW;
     canvas.height = drawH;
 
-    const data = await apiGet(`/api/project_label?project=${encodeURIComponent(projectName)}&rel=${encodeURIComponent(rel)}&anomaly_sensitivity=${encodeURIComponent(anomalySensitivity)}`);
+    const data = await apiGet(msaMode
+        ? `/api/project/msa/label?project=${encodeURIComponent(projectName)}&rel=${encodeURIComponent(rel)}`
+        : `/api/project_label?project=${encodeURIComponent(projectName)}&rel=${encodeURIComponent(rel)}&anomaly_sensitivity=${encodeURIComponent(anomalySensitivity)}`);
     setEditorLoadProgress(72, 'Đã đọc label, đang dựng bbox...');
     currentImageAnomalyItems = Array.isArray(data.anomaly_items) ? data.anomaly_items : [];
     const anomalyIndexSet = new Set(Array.isArray(data.anomaly_box_indices) ? data.anomaly_box_indices.map(x => Number(x)) : []);
@@ -1292,14 +1802,10 @@ async function loadCurrentImageAndLabel() {
     selectedBox = boxes.length ? 0 : -1;
     selectedBoxes = selectedBox >= 0 ? new Set([selectedBox]) : new Set();
 
-    try {
-        const info = await apiGet(`/api/project_image_info?project=${encodeURIComponent(projectName)}&rel=${encodeURIComponent(rel)}`);
-        setImageInfo(info.name, info.modified_at, info.root_link || info.path || '');
-    } catch (e) {
-        setImageInfo(rel, '-', '');
-    }
-
     draw();
+    markLabelClean();
+    const item = imageItems[idx] || {};
+    setImageInfo(item.name || rel, item.modified_at || '-', rel);
     const anomalyText = Number(data.bbox_anomaly_count || 0) > 0 ? ` | ABN: ${Number(data.bbox_anomaly_count || 0)}` : '';
     setStatus(`Image ${idx + 1}/${images.length}: ${rel}${anomalyText}`);
     ensureImageIndexVisible(idx);
@@ -1314,8 +1820,8 @@ async function switchToImageIndex(i, options = {}) {
     const targetIdx = Math.max(0, Math.min(Number(i || 0), Math.max(0, images.length - 1)));
     const saveCurrent = options.saveCurrent !== false;
     if (targetIdx === idx) return;
-    if (saveCurrent && images[idx]) {
-        await saveLabel();
+    if (saveCurrent) {
+        await saveCurrentLabelIfDirty();
     }
     idx = targetIdx;
     ensureImageIndexVisible(idx);
@@ -1327,17 +1833,129 @@ async function selectImageByIndex(i) {
     await switchToImageIndex(i, { saveCurrent: true });
 }
 
+async function saveCurrentLabelIfDirty() {
+    if (!images[idx]) return false;
+    syncLabelDirty();
+    if (!labelDirty) return false;
+    await saveLabel();
+    return true;
+}
+
+function openProjectDataUpload() {
+    const input = document.getElementById('projectDataInput');
+    if (!input) return;
+    input.value = '';
+    input.click();
+}
+
+async function handleProjectDataUploadInput(inputEl) {
+    const files = inputEl && inputEl.files ? Array.from(inputEl.files) : [];
+    if (!files.length) return;
+
+    try {
+        await saveCurrentLabelIfDirty();
+        setEditorLoadProgress(0, 'Đang thêm data...');
+        const isSingleZip = files.length === 1 && String(files[0].name || '').toLowerCase().endsWith('.zip');
+        const data = isSingleZip
+            ? await uploadEditorFilesWithProgress(
+                '/api/project/import_data_zip',
+                files,
+                { project: projectName },
+                'Đang upload data zip...'
+            )
+            : await uploadEditorFilesWithProgress(
+                '/api/project/import_data_images',
+                files,
+                { project: projectName },
+                'Đang upload ảnh...'
+            );
+
+        setEditorLoadProgress(100, data.message || 'Đã thêm data');
+        notifyDataChanged('label_editor_add_data');
+        await loadImages(1, currentQuery);
+        setStatus(data.message || 'Đã thêm data vào project');
+        setTimeout(() => hideEditorLoadProgress(), 500);
+    } catch (e) {
+        hideEditorLoadProgress();
+        alert(String(e.message || e));
+    } finally {
+        if (inputEl) inputEl.value = '';
+    }
+}
+
+async function runQuickPredictUnlabeled() {
+    try {
+        await saveCurrentLabelIfDirty();
+        setEditorLoadProgress(0, 'Quick Predict: tìm latest best.pt...');
+        const data = await apiGet('/api/project/predict_unlabeled/quick', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ project: projectName })
+        });
+
+        const taskId = String(data.task_id || '');
+        const weightsRel = String(data.weights_rel || 'best.pt');
+        let finalMessage = data.message || 'Predict hoàn tất';
+        while (true) {
+            const status = await apiGet('/api/project/predict_unlabeled/status');
+            if (String(status.id || '') !== taskId) {
+                throw new Error('Prediction task changed unexpectedly');
+            }
+            const pct = Math.max(0, Math.min(100, Number(status.progress) || 0));
+            const detail = String(status.detail || weightsRel);
+            setEditorLoadProgress(pct, `Quick Predict: ${detail}`);
+
+            if (status.status === 'success') {
+                finalMessage = status.message || finalMessage;
+                setEditorLoadProgress(100, finalMessage);
+                break;
+            }
+            if (status.status === 'failed') {
+                throw new Error(status.message || 'Prediction failed');
+            }
+            await new Promise(resolve => setTimeout(resolve, 800));
+        }
+
+        notifyDataChanged('label_editor_quick_predict');
+        await loadImages(1, currentQuery);
+        setStatus(`${finalMessage} | ${weightsRel}`);
+        setTimeout(() => hideEditorLoadProgress(), 600);
+    } catch (e) {
+        hideEditorLoadProgress();
+        alert(String(e.message || e));
+    }
+}
+
 async function saveLabel() {
     if (!images[idx]) return;
     const rel = images[idx];
     const text = toYoloText();
-    await apiGet('/api/project_label', {
+    syncLabelDirty();
+    if (!labelDirty) {
+        setCurrentImageStatus(rel, currentImageAnomalyItems.length, 'Không có thay đổi');
+        return;
+    }
+    await apiGet(msaMode ? '/api/project/msa/label' : '/api/project_label', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({ project: projectName, rel, text })
     });
+    markLabelClean();
+    if (msaMode && window.parent !== window) {
+        window.parent.postMessage({ type: 'msa-label-saved', project: projectName, image: rel }, window.location.origin);
+    }
     const anomalyInfo = await refreshCurrentImageAnomalies(rel);
+    const currentItem = imageItems[idx];
+    if (currentItem) {
+        currentItem.bbox_count = boxes.length;
+        currentItem.class_ids = Array.from(new Set(boxes.map(b => Number(b.cls || 0)))).sort((a, b) => a - b);
+        currentItem.class_min = currentItem.class_ids.length ? currentItem.class_ids[0] : 1000000000;
+        currentItem.bbox_anomaly_count = anomalyInfo?.bboxAnomalyCount || 0;
+        currentItem.bbox_has_anomaly = Number(anomalyInfo?.bboxAnomalyCount || 0) > 0;
+    }
+    renderImageList();
     setCurrentImageStatus(rel, anomalyInfo?.bboxAnomalyCount || 0, 'Đã lưu label');
+    notifyDataChanged('label_saved');
 }
 
 async function saveLabelAndMoveToTrain() {
@@ -1360,8 +1978,78 @@ async function saveLabelAndMoveToTrain() {
         })
     });
     promoteValidRel = '';
+    markLabelClean();
     updatePromoteButton();
     setStatus(`Đã chuyển sang train và xóa khỏi valid: ${data.valid_rel || rel}`);
+    notifyDataChanged('promote_valid_to_train');
+}
+
+async function deleteImageByIndex(event, imageIndex) {
+    if (event) {
+        event.preventDefault();
+        event.stopPropagation();
+    }
+    if (!images.length) return;
+    const targetIndex = Math.max(0, Math.min(Number(imageIndex || 0), images.length - 1));
+    const rel = images[targetIndex];
+    if (!rel) return;
+    const ok = window.confirm(`Xóa ảnh này khỏi project?\n\n${rel}\n\nFile label tương ứng cũng sẽ bị xóa nếu tồn tại.`);
+    if (!ok) return;
+
+    try {
+        await apiGet('/api/project_image', {
+            method: 'DELETE',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ project: projectName, rel })
+        });
+
+        const deletedCurrent = targetIndex === idx;
+        images.splice(targetIndex, 1);
+        imageItems.splice(targetIndex, 1);
+        totalImages = Math.max(0, totalImages - 1);
+        notifyDataChanged('image_deleted');
+
+        if (!images.length) {
+            idx = 0;
+            baseImg = null;
+            drawW = 0;
+            drawH = 0;
+            canvas.width = 1;
+            canvas.height = 1;
+            renderImageList();
+            updatePageInfo();
+            setImageInfo('-', '-', '');
+            setStatus('Đã xóa ảnh. Không còn ảnh trong danh sách.');
+            draw();
+            return;
+        }
+
+        if (deletedCurrent) {
+            selectedBox = -1;
+            selectedBoxes = new Set();
+            boxes = [];
+            currentImageAnomalyItems = [];
+            markLabelClean();
+        } else if (targetIndex < idx) {
+            idx = Math.max(0, idx - 1);
+        }
+
+        if (idx >= images.length) idx = images.length - 1;
+        renderImageList();
+        updatePageInfo();
+        if (deletedCurrent) {
+            await loadCurrentImageAndLabel();
+        } else {
+            setCurrentImageStatus(images[idx], currentImageAnomalyItems.length, `Đã xóa ảnh: ${rel}`);
+        }
+        setStatus(`Đã xóa ảnh: ${rel}`);
+    } catch (e) {
+        alert(String(e.message || e));
+    }
+}
+
+async function deleteCurrentImage() {
+    await deleteImageByIndex(null, idx);
 }
 
 async function nextImage() {
@@ -1394,7 +2082,21 @@ function shouldIgnoreEditorHotkeys(target) {
 async function onEditorKeyDown(e) {
     if (shouldIgnoreEditorHotkeys(e.target)) return;
     if (e.defaultPrevented) return;
+
+    if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && String(e.key || '').toLowerCase() === 'a') {
+        e.preventDefault();
+        selectAllBoxes();
+        setStatus(`Đã chọn toàn bộ ${boxes.length} bbox`);
+        return;
+    }
+
     if (e.ctrlKey || e.altKey || e.metaKey || e.shiftKey) return;
+
+    if (e.key === ' ' || e.code === 'Space') {
+        e.preventDefault();
+        toggleBboxVisible();
+        return;
+    }
 
     if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
         e.preventDefault();
@@ -1414,6 +2116,19 @@ function onMouseDown(e) {
     const p = canvasPointFromEvent(e);
     dragStart = {x: p.x, y: p.y};
 
+    const actionHit = hitBoxAction(p.x, p.y);
+    if (actionHit) {
+        if (actionHit.action === 'duplicate') {
+            duplicateBox(actionHit.index);
+        } else if (actionHit.action === 'delete') {
+            deleteBoxByIndex(actionHit.index);
+        }
+        dragging = false;
+        drawMode = 'none';
+        resizeHandle = '';
+        return;
+    }
+
     const labelHit = hitBoxLabelIndex(p.x, p.y);
     if (labelHit >= 0) {
         const labelRect = getBoxLabelRect(boxes[labelHit]);
@@ -1429,7 +2144,9 @@ function onMouseDown(e) {
     if (hit >= 0) {
         hideClassPopup();
         selectedBox = hit;
-        selectedBoxes = new Set([hit]);
+        if (!selectedBoxes.has(hit)) {
+            selectedBoxes = new Set([hit]);
+        }
 
         const h = hitResizeHandle(p.x, p.y, boxes[hit]);
         if (h) {
@@ -1445,6 +2162,7 @@ function onMouseDown(e) {
         dragging = true;
         dragOffset.x = p.x - b.x;
         dragOffset.y = p.y - b.y;
+        captureSelectedBoxPositions();
         draw();
         return;
     }
@@ -1455,8 +2173,10 @@ function onMouseDown(e) {
     const defaultCls = Number.isNaN(parseInt(clsSel.value, 10)) ? 0 : parseInt(clsSel.value, 10);
     const newBox = { cls: defaultCls, x: p.x, y: p.y, w: 1, h: 1 };
     boxes.push(newBox);
+    markLabelDirty();
     selectedBox = boxes.length - 1;
     selectedBoxes = new Set([selectedBox]);
+    dragStartBoxes = new Map();
     drawMode = 'draw';
     dragging = true;
     draw();
@@ -1468,8 +2188,11 @@ function onMouseMove(e) {
     const b = boxes[selectedBox];
 
     if (drawMode === 'move') {
-        b.x = clamp(p.x - dragOffset.x, 0, Math.max(0, drawW - b.w));
-        b.y = clamp(p.y - dragOffset.y, 0, Math.max(0, drawH - b.h));
+        const start = dragStartBoxes.get(selectedBox) || { x: b.x, y: b.y };
+        const dx = (p.x - dragOffset.x) - start.x;
+        const dy = (p.y - dragOffset.y) - start.y;
+        moveSelectedBoxesFromDrag(dx, dy);
+        markLabelDirty();
     } else if (drawMode === 'draw') {
         const x1 = clamp(dragStart.x, 0, drawW);
         const y1 = clamp(dragStart.y, 0, drawH);
@@ -1479,6 +2202,7 @@ function onMouseMove(e) {
         b.y = Math.min(y1, y2);
         b.w = Math.max(1, Math.abs(x2 - x1));
         b.h = Math.max(1, Math.abs(y2 - y1));
+        markLabelDirty();
     } else if (drawMode === 'resize') {
         let x = b.x, y = b.y, w = b.w, h = b.h;
         const right = b.x + b.w;
@@ -1493,6 +2217,7 @@ function onMouseMove(e) {
         if (resizeHandle.includes('w')) w = Math.max(1, right - x);
 
         b.x = x; b.y = y; b.w = w; b.h = h;
+        markLabelDirty();
     }
 
     draw();
@@ -1503,6 +2228,7 @@ function onMouseUp() {
         const b = boxes[selectedBox];
         if (b.w < 4 || b.h < 4) {
             boxes.splice(selectedBox, 1);
+            syncLabelDirty();
             selectedBox = boxes.length ? boxes.length - 1 : -1;
             selectedBoxes = selectedBox >= 0 ? new Set([selectedBox]) : new Set();
         }
@@ -1510,10 +2236,16 @@ function onMouseUp() {
     dragging = false;
     drawMode = 'none';
     resizeHandle = '';
+    dragStartBoxes = new Map();
     draw();
 }
 
 function onDocumentMouseDown(e) {
+    if (classFilterOpen && !e.target.closest?.('#classFilterDropdown')) {
+        classFilterOpen = false;
+        renderImageTableHead();
+    }
+
     if (!classPopupState.visible) return;
     const popup = getClassPopupEl();
     if (popup && popup.contains(e.target)) return;
@@ -1526,6 +2258,8 @@ function onDocumentMouseDown(e) {
     ctx = canvas.getContext('2d');
 
     canvas.addEventListener('mousedown', onMouseDown);
+    const wrap = document.querySelector('.canvas-wrap');
+    if (wrap) wrap.addEventListener('wheel', onCanvasWheel, { passive: false });
     window.addEventListener('mousemove', onMouseMove);
     window.addEventListener('mouseup', onMouseUp);
     document.addEventListener('mousedown', onDocumentMouseDown);
@@ -1538,28 +2272,31 @@ function onDocumentMouseDown(e) {
     imageList.addEventListener('scroll', () => renderImageList());
 })();
 
-(function initLayoutRatio() {
-    let start = 1.8;
-    try {
-        const saved = Number(localStorage.getItem('project_editor_left_fr'));
-        if (!Number.isNaN(saved)) start = saved;
-    } catch (e) {
-        // ignore
-    }
-
-    const slider = document.getElementById('layoutRatio');
-    if (slider) slider.value = String(start);
-    applyLayoutRatio(start);
-    window.addEventListener('resize', () => applyLayoutRatio(layoutLeftFr));
-})();
-
 (async function init() {
     try {
         await Promise.all([loadClasses(), loadImages()]);
+        if (msaMode && window.parent !== window) {
+            window.parent.postMessage({ type: 'msa-editor-ready', project: projectName }, window.location.origin);
+        }
     } catch (e) {
         setStatus(String(e.message || e));
     }
 })();
+window.addEventListener('message', async event => {
+    if (!msaMode || event.origin !== window.location.origin) return;
+    if (event.data?.type === 'msa-refresh-images') {
+        pendingInitialRel = String(event.data.image || images[idx] || '');
+        try { await loadImages(1, currentQuery); }
+        catch (error) { setStatus(String(error.message || error)); }
+        return;
+    }
+    if (event.data?.type !== 'msa-open-image') return;
+    const target = images.indexOf(String(event.data.image || ''));
+    if (target >= 0) {
+        try { await switchToImageIndex(target); }
+        catch (error) { setStatus(String(error.message || error)); }
+    }
+});
 </script>
 </body>
 </html>

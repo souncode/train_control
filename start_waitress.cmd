@@ -1,0 +1,19 @@
+@echo off
+cd /d "%~dp0"
+
+set TRAIN_CONTROL_HTTPS=0
+set TRAIN_CONTROL_BEHIND_HTTPS_PROXY=0
+set TRAIN_CONTROL_HOST=0.0.0.0
+set TRAIN_CONTROL_PORT=820
+set TRAIN_CONTROL_WAITRESS_THREADS=48
+set TRAIN_CONTROL_WAITRESS_CONNECTION_LIMIT=1000
+set TRAIN_CONTROL_WAITRESS_CHANNEL_TIMEOUT=120
+set TRAIN_CONTROL_WAITRESS_CLEANUP_INTERVAL=30
+
+if exist "%~dp0tools\caddy\caddy.exe" (
+    "%~dp0tools\caddy\caddy.exe" stop >nul 2>nul
+)
+
+echo Web monitor is running at: http://127.0.0.1:820
+waitress-serve --host=0.0.0.0 --port=820 --threads=%TRAIN_CONTROL_WAITRESS_THREADS% --connection-limit=%TRAIN_CONTROL_WAITRESS_CONNECTION_LIMIT% --channel-timeout=%TRAIN_CONTROL_WAITRESS_CHANNEL_TIMEOUT% --cleanup-interval=%TRAIN_CONTROL_WAITRESS_CLEANUP_INTERVAL% TrainControl:app
+pause

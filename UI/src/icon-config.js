@@ -5,10 +5,12 @@ window.TOOLBAR_ICON_CONFIG = {
         upload_project: { path: '/UI/src/icons/upload.svg' },
         train_selected: { path: '/UI/src/icons/train-selected.svg' },
         backup_selected: { path: '/UI/src/icons/download.svg' },
-        download_success_outputs: { path: '/UI/src/icons/download.svg' },
+        download_selected_outputs: { path: '/UI/src/icons/download.svg' },
         train_all: { path: '/UI/src/icons/train-all.svg' },
         retry_failed: { path: '/UI/src/icons/retry.svg' },
         clear_history: { path: '/UI/src/icons/history.svg' },
+        activity_log: { path: '/UI/src/icons/activity-log.svg' },
+        account_manager: { path: '/UI/src/icons/account-manager.svg' },
         stop_current_train: { path: '/UI/src/icons/stop-current.svg' },
         stop_queue: { path: '/UI/src/icons/stop-queue.svg' },
         select_all: { path: '/UI/src/icons/select-all.svg' },
@@ -16,6 +18,7 @@ window.TOOLBAR_ICON_CONFIG = {
         expand_all: { path: '/UI/src/icons/expand.svg' },
         collapse_all: { path: '/UI/src/icons/collapse.svg' },
         refresh: { path: '/UI/src/icons/refresh.svg' },
+        restart_server: { path: '/UI/src/icons/restart-server.svg' },
         notify_telegram: { path: '/UI/src/icons/bell.svg' },
         logout: { path: '/UI/src/icons/logout.svg' }
     }

@@ -1,0 +1,5 @@
+certs/*.pem
+certs/*.key
+certs/*.cer
+tools/caddy/
+.caddy-data/
